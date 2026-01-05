@@ -12,22 +12,35 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
-// --- HELPERS (Funciones Externas para evitar errores de pureza) ---
-// Al estar fuera del componente, React no se queja de "impure function"
-const generateId = () => Date.now();
+// --- 1. IMPORTACIONES DE FIREBASE ---
+import { db } from "../../firebase/config";
+import {
+  collection,
+  getDocs,
+  doc,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+} from "firebase/firestore";
+
+// Helper ID
 const generateRandomRef = () => `REF-${Math.floor(Math.random() * 1000000)}`;
 
-export default function Products() {
-  // --- 1. ESTADOS DE DATOS ---
-  const [products, setProducts] = useState(() => {
-    const saved = localStorage.getItem("shopProducts");
-    return saved ? JSON.parse(saved) : [];
-  });
+export default function AdminProducts() {
+  // --- 1. ESTADOS DE DATOS (Conectados a Firebase) ---
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(false);
 
-  // Categorías (Solo lectura)
+  // Referencia a la colección (para evitar warnings)
+  const productsCollection = collection(db, "products");
+
+  // Categorías (LocalStorage por ahora para mantener compatibilidad visual)
   const [categories] = useState(() => {
-    const saved = localStorage.getItem("shopCategories");
-    return saved ? JSON.parse(saved) : [];
+    try {
+      return JSON.parse(localStorage.getItem("shopCategories") || "[]");
+    } catch {
+      return [];
+    }
   });
 
   // --- 2. ESTADOS DEL FORMULARIO ---
@@ -36,7 +49,6 @@ export default function Products() {
   const [showVariants, setShowVariants] = useState(false);
 
   const initialForm = {
-    id: "",
     title: "",
     price: "",
     oldPrice: "",
@@ -52,16 +64,31 @@ export default function Products() {
   };
   const [formData, setFormData] = useState(initialForm);
 
-  // --- 3. EFECTO: GUARDAR PRODUCTOS ---
-  useEffect(() => {
-    localStorage.setItem("shopProducts", JSON.stringify(products));
-  }, [products]);
+  // --- 3. CARGAR PRODUCTOS DESDE FIREBASE ---
+  const fetchProducts = async () => {
+    setLoading(true);
+    try {
+      const querySnapshot = await getDocs(productsCollection);
+      const docs = querySnapshot.docs.map((doc) => ({
+        ...doc.data(),
+        id: doc.id,
+      }));
+      setProducts(docs);
+    } catch (error) {
+      console.error("Error al cargar productos:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  // --- 4. LOGICA EXCEL ---
+  useEffect(() => {
+    fetchProducts();
+  }, []);
+
+  // --- 4. LÓGICA EXCEL (Solo lectura por ahora) ---
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = (evt) => {
       const bstr = evt.target.result;
@@ -69,40 +96,15 @@ export default function Products() {
       const wsname = wb.SheetNames[0];
       const ws = wb.Sheets[wsname];
       const data = XLSX.utils.sheet_to_json(ws);
-
-      // Usamos el helper externo
-      const baseId = generateId();
-
-      const importedProducts = data.map((row, index) => ({
-        id: row.IdProducto || baseId + index,
-        title: row.Titulo || "Sin título",
-        description: row.Descripcion || "",
-        price: row.Precio || 0,
-        oldPrice: 0,
-        stock: row.Cantidad || 0,
-        bestSeller: (row.MasVendido || "").toLowerCase() === "si" ? "si" : "no",
-        reference:
-          row.Referencia || `REF-${(baseId + index).toString().slice(-6)}`,
-        brand: row.Marca || "Genérica",
-        images: [
-          row.Imagen1 || null,
-          row.Imagen2 || null,
-          row.Imagen3 || null,
-          row.Imagen4 || null,
-        ],
-        categoryId: "",
-        subcategoryId: "",
-        items: [],
-      }));
-
-      setProducts([...products, ...importedProducts]);
-      alert(`¡Éxito! Se importaron ${importedProducts.length} productos.`);
+      alert(
+        `Leídas ${data.length} filas. (Lógica de subida masiva pendiente de reconectar)`
+      );
     };
     reader.readAsBinaryString(file);
   };
   const excelInputRef = useRef(null);
 
-  // --- 5. LÓGICA DEL FORMULARIO ---
+  // --- 5. LÓGICA DEL FORMULARIO (TU VISUAL INTACTO) ---
   const selectedCatObj = categories.find((c) => c.id == formData.categoryId);
   const availableSubcats = selectedCatObj ? selectedCatObj.subcategories : [];
 
@@ -141,33 +143,73 @@ export default function Products() {
     setFormData((prev) => ({ ...prev, items: [...prev.items, ""] }));
   };
 
-  const handleSubmit = (e) => {
+  // --- 6. GUARDAR EN FIREBASE (LÓGICA BLINDADA) ---
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setLoading(true);
 
-    // CORRECCIÓN FINAL: Usamos el helper externo aquí
-    const finalRef = formData.reference || generateRandomRef();
+    try {
+      const finalRef = formData.reference || generateRandomRef();
 
-    const productToSave = {
-      ...formData,
-      reference: finalRef,
-      brand: formData.brand || "Genérica",
-    };
+      // Limpieza de datos para Firebase (evita errores 'undefined')
+      const productData = {
+        title: formData.title || "Sin Título",
+        price: Number(formData.price) || 0,
+        oldPrice: Number(formData.oldPrice) || 0,
+        categoryId: formData.categoryId || "",
+        subcategoryId: formData.subcategoryId || "",
+        stock: Number(formData.stock) || 0,
+        bestSeller: formData.bestSeller || "no",
+        description: formData.description || "",
+        reference: finalRef,
+        brand: formData.brand || "Genérica",
+        // Filtramos items vacíos pero mantenemos el array
+        items: formData.items
+          ? formData.items.filter((i) => i && i.trim() !== "")
+          : [],
+        // Convertimos undefined a null para imágenes
+        images: formData.images.map((img) => img || null),
+        updatedAt: new Date(),
+      };
 
-    if (editingId) {
-      setProducts((prev) =>
-        prev.map((p) =>
-          p.id === editingId ? { ...productToSave, id: editingId } : p
-        )
-      );
-    } else {
-      // Usamos el helper externo aquí también
-      setProducts((prev) => [...prev, { ...productToSave, id: generateId() }]);
+      if (editingId) {
+        // EDITAR
+        const productRef = doc(db, "products", editingId);
+        await updateDoc(productRef, productData);
+        alert("Producto actualizado correctamente ✅");
+      } else {
+        // CREAR (Usamos addDoc para ID automático)
+        await addDoc(productsCollection, {
+          ...productData,
+          createdAt: new Date(),
+        });
+        alert("Producto creado exitosamente 🚀");
+      }
+
+      closeModal();
+      fetchProducts(); // Recargar lista visual
+    } catch (error) {
+      console.error("Error guardando producto:", error);
+      alert(`Error al guardar: ${error.message}`);
+    } finally {
+      setLoading(false);
     }
-    closeModal();
   };
 
   const openEdit = (product) => {
-    setFormData(product);
+    // Asegurar estructura de imágenes al editar
+    const safeImages = [null, null, null, null];
+    if (product.images) {
+      product.images.forEach((img, i) => {
+        if (i < 4) safeImages[i] = img;
+      });
+    }
+
+    setFormData({
+      ...initialForm,
+      ...product,
+      images: safeImages,
+    });
     setEditingId(product.id);
     setShowVariants(product.items && product.items.length > 0);
     setIsModalOpen(true);
@@ -180,9 +222,19 @@ export default function Products() {
     setShowVariants(false);
   };
 
-  const handleDelete = (id) => {
-    if (window.confirm("¿Seguro que deseas eliminar este producto?")) {
-      setProducts((prev) => prev.filter((p) => p.id !== id));
+  // --- 7. ELIMINAR DE FIREBASE ---
+  const handleDelete = async (id) => {
+    if (window.confirm("¿Estás seguro de eliminar este producto de la nube?")) {
+      try {
+        setLoading(true);
+        await deleteDoc(doc(db, "products", id));
+        await fetchProducts();
+      } catch (error) {
+        console.error("Error eliminando:", error);
+        alert("No se pudo eliminar el producto.");
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
@@ -194,7 +246,7 @@ export default function Products() {
     }).format(price);
   };
 
-  // Clases de estilo constantes
+  // Clases de estilo constantes (TUS CLASES ORIGINALES)
   const labelClass =
     "block text-xs font-bold text-slate-500 uppercase tracking-wider ml-1 mb-2";
   const inputClass =
@@ -209,7 +261,7 @@ export default function Products() {
             Gestión de Productos
           </h1>
           <p className="text-sm text-slate-500">
-            Administra tu inventario, precios y stock
+            Administra tu inventario en la Nube (Firebase)
           </p>
         </div>
 
@@ -272,13 +324,22 @@ export default function Products() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {products.length === 0 ? (
+              {loading ? (
+                <tr>
+                  <td
+                    colSpan="8"
+                    className="text-center py-12 text-slate-400 animate-pulse"
+                  >
+                    Cargando productos de la nube...
+                  </td>
+                </tr>
+              ) : products.length === 0 ? (
                 <tr>
                   <td
                     colSpan="8"
                     className="text-center py-8 text-slate-400 italic"
                   >
-                    No hay productos. ¡Agrega uno o importa un Excel!
+                    No hay productos. ¡Agrega uno!
                   </td>
                 </tr>
               ) : (
@@ -372,7 +433,7 @@ export default function Products() {
         </div>
       </div>
 
-      {/* --- MODAL FLOTANTE --- */}
+      {/* --- MODAL FLOTANTE (INTACTO) --- */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 sm:p-6 transition-opacity">
           <div className="bg-white w-full max-w-3xl rounded-3xl shadow-2xl flex flex-col max-h-[90vh] animate-in fade-in zoom-in duration-200 overflow-hidden">
@@ -493,7 +554,7 @@ export default function Products() {
                   </div>
                 </div>
 
-                {/* 4. Marca y Referencia (NUEVOS) */}
+                {/* 4. Marca y Referencia */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
                   <div>
                     <label className={labelClass}>Referencia</label>
@@ -660,18 +721,30 @@ export default function Products() {
               <button
                 form="product-form"
                 type="submit"
+                disabled={loading}
                 className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-600/20 transition transform active:scale-[0.99]"
               >
-                {editingId ? "Guardar Cambios" : "Publicar Producto"}
+                {loading
+                  ? "Guardando en la Nube..."
+                  : editingId
+                  ? "Guardar Cambios"
+                  : "Publicar Producto"}
               </button>
             </div>
           </div>
         </div>
       )}
       <style jsx>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 20px; }
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background-color: #cbd5e1;
+          border-radius: 20px;
+        }
       `}</style>
     </div>
   );

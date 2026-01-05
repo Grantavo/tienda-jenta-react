@@ -1,83 +1,111 @@
+// src/components/ProductCard.jsx
 import React from "react";
+import { Link } from "react-router-dom";
+import { ShoppingCart, Search } from "lucide-react";
 
-export default function ProductCard({ producto }) {
+export default function ProductCard({ product }) {
+  // 1. Lógica de Datos
+  const price = Number(product.price) || 0;
+  const oldPrice = Number(product.oldPrice) || 0;
+  const stock = Number(product.stock) || 0;
+  const brand = product.brand || "Genérica";
+  const title = product.title || "Sin Título";
+  const imageSrc =
+    product.images && product.images[0] ? product.images[0] : null;
+
+  // 2. Cálculos
+  const hasDiscount = oldPrice > price;
+  const discountPercent = hasDiscount
+    ? Math.round(((oldPrice - price) / oldPrice) * 100)
+    : 0;
+  const isOutOfStock = stock <= 0;
+
+  // 3. Formateador de Moneda
+  const formatPrice = (value) => {
+    return new Intl.NumberFormat("es-CO", {
+      style: "currency",
+      currency: "COP",
+      maximumFractionDigits: 0,
+    }).format(value);
+  };
+
   return (
-    // CAMBIO 1: 'group' para controlar el hover.
-    // Usamos 'aspect-[4/5]' (o aspect-square) para que TODAS las cards tengan el mismo tamaño exacto.
-    <div className="group relative w-full aspect-[5/6] overflow-hidden rounded-2xl bg-gray-100 shadow-md hover:shadow-xl transition-all duration-300">
-      {/* CAMBIO 2: CONTENEDOR DE IMÁGENES
-         Las imágenes ahora son "absolute inset-0". Llenan todo el espacio disponible del padre.
-         Esto elimina el error de la "punta" blanca abajo.
-      */}
-
-      {/* Imagen Principal (Visible por defecto) */}
-      <img
-        src={producto.imagen1}
-        alt={producto.nombre}
-        className="absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ease-in-out group-hover:opacity-0"
-      />
-
-      {/* Imagen Secundaria (Visible al Hover) */}
-      {producto.imagen2 && (
-        <img
-          src={producto.imagen2}
-          alt={producto.nombre}
-          className="absolute inset-0 h-full w-full object-cover opacity-0 transition-opacity duration-500 ease-in-out group-hover:opacity-100"
-        />
+    <div className="bg-white rounded-[20px] border border-slate-100 overflow-hidden hover:shadow-xl transition-all duration-300 group flex flex-col h-full relative">
+      {/* BADGE: Oferta (Rojo, arriba izquierda) */}
+      {hasDiscount && !isOutOfStock && (
+        <span className="absolute top-4 left-4 bg-[#DC2626] text-white text-[11px] font-bold px-2.5 py-1 rounded-md z-10 shadow-sm">
+          -{discountPercent}% OFF
+        </span>
       )}
 
-      {/* CAMBIO 3: BADGE DE OFERTA (Opcional, se ve profesional)
-         Si tiene precio anterior, mostramos una etiqueta de "Oferta"
-      */}
-      {producto.precioAnterior && (
-        <div className="absolute top-3 right-3 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full shadow-sm">
-          OFERTA
+      {/* BADGE: Agotado */}
+      {isOutOfStock && (
+        <div className="absolute inset-0 bg-white/70 z-20 flex items-center justify-center backdrop-blur-[2px]">
+          <span className="bg-slate-800 text-white font-bold px-4 py-2 rounded-full text-xs shadow-lg">
+            AGOTADO
+          </span>
         </div>
       )}
 
-      {/* CAMBIO 4: INFORMACIÓN MEJORADA
-         Ahora el fondo es blanco solido para mejor lectura, y sube ligeramente.
-      */}
-      <div className="absolute bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-100 transition-transform duration-300 translate-y-0">
-        <h3 className="text-md font-bold text-gray-900 truncate">
-          {producto.nombre}
-        </h3>
-
-        <div className="flex items-center justify-between mt-2">
-          <div className="flex flex-col">
-            <span className="text-xs text-gray-500 uppercase font-semibold tracking-wide">
-              {producto.marca || "Genta"}
-            </span>
-            <div className="flex items-center gap-2">
-              <span className="text-red-600 font-bold text-lg">
-                ${producto.precio}
-              </span>
-              {producto.precioAnterior && (
-                <span className="text-gray-400 text-xs line-through">
-                  ${producto.precioAnterior}
-                </span>
-              )}
-            </div>
+      {/* IMAGEN */}
+      <div className="aspect-square bg-[#F8FAFC] relative overflow-hidden flex items-center justify-center p-6">
+        {imageSrc ? (
+          <img
+            src={imageSrc}
+            alt={title}
+            className="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-500"
+          />
+        ) : (
+          <div className="text-slate-300 font-bold flex flex-col items-center">
+            <Search size={32} />
+            <span className="text-xs mt-2">Sin foto</span>
           </div>
+        )}
+      </div>
 
-          {/* Botón "+" decorativo que se ilumina al pasar el mouse por la card */}
-          <button className="bg-gray-100 p-2 rounded-full text-gray-600 group-hover:bg-red-600 group-hover:text-white transition-colors duration-300">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-5 w-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 4v16m8-8H4"
-              />
-            </svg>
-          </button>
+      {/* INFO DEL PRODUCTO */}
+      <div className="p-5 flex flex-col flex-1">
+        {/* Marca */}
+        <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">
+          {brand}
+        </p>
+
+        {/* Título */}
+        <Link
+          to={`/producto/${product.id}`}
+          className="group-hover:text-blue-600 transition-colors mb-3"
+        >
+          <h3 className="font-bold text-slate-800 text-[15px] leading-snug line-clamp-2 min-h-[2.5rem]">
+            {title}
+          </h3>
+        </Link>
+
+        {/* Precios */}
+        <div className="mb-4">
+          {hasDiscount && (
+            <span className="block text-sm text-slate-400 line-through mb-0.5 font-medium">
+              {formatPrice(oldPrice)}
+            </span>
+          )}
+          <span
+            className={`block font-black text-xl ${
+              hasDiscount ? "text-[#DC2626]" : "text-slate-800"
+            }`}
+          >
+            {formatPrice(price)}
+          </span>
         </div>
+
+        {/* BOTÓN VER DETALLE */}
+        <Link to={`/producto/${product.id}`} className="mt-auto">
+          <button
+            disabled={isOutOfStock}
+            className="w-full bg-[#F1F5F9] text-slate-700 font-bold py-3 rounded-xl text-sm hover:bg-[#0F172A] hover:text-white transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <ShoppingCart size={18} />
+            {isOutOfStock ? "Sin Stock" : "Ver Detalle"}
+          </button>
+        </Link>
       </div>
     </div>
   );

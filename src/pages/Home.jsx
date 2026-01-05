@@ -1,16 +1,52 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import {
-  ArrowRight,
-  ShoppingBag,
-  ShoppingCart,
-  Star,
-  ChevronLeft,
-  ChevronRight,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, ShoppingBag } from "lucide-react";
+
+// 1. IMPORTAMOS LAS HERRAMIENTAS DE FIREBASE
+import { db } from "../firebase/config";
+import { collection, getDocs, query, where, limit } from "firebase/firestore";
+
+// 2. IMPORTAMOS EL COMPONENTE MAESTRO (NUEVO)
+import ProductCard from "../components/ProductCard";
 
 export default function Home() {
-  // --- 1. CARGA DE DATOS ---
+  // --- ESTADOS DE DATOS ---
+  const [categories, setCategories] = useState([]);
+  const [featuredProducts, setFeaturedProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // --- 2. EFECTO: CARGAR DATOS DESDE FIREBASE ---
+  useEffect(() => {
+    const fetchFirebaseData = async () => {
+      try {
+        setLoading(true);
+
+        // A. Cargar Categorías
+        const catRef = collection(db, "categories");
+        const catSnap = await getDocs(catRef);
+        const catsData = catSnap.docs.map((doc) => doc.data());
+        setCategories(catsData);
+
+        // B. Cargar Productos Destacados (Tendencias)
+        const prodRef = collection(db, "products");
+        const q = query(prodRef, where("bestSeller", "==", "si"), limit(4));
+        const prodSnap = await getDocs(q);
+        const prodsData = prodSnap.docs.map((doc) => ({
+          id: doc.id, // Aseguramos pasar el ID
+          ...doc.data(),
+        }));
+        setFeaturedProducts(prodsData);
+      } catch (error) {
+        console.error("Error cargando desde Firebase:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchFirebaseData();
+  }, []);
+
+  // --- DATOS VISUALES (LocalStorage) ---
   const [topBar] = useState(() => {
     try {
       const saved = localStorage.getItem("shopDesign");
@@ -32,15 +68,14 @@ export default function Home() {
         localStorage.getItem("shopBanners") || "[]"
       );
       const activeBanners = savedBanners.filter((b) => b.active);
-
       if (activeBanners.length > 0) return activeBanners;
-
       return [
         {
           id: 999,
           title: "BIENVENIDO",
-          subtitle: "Configura este banner en el admin",
+          subtitle: "Explora nuestro catálogo completo",
           btnText: "Ver Productos",
+          link: "/productos",
           image: null,
         },
       ];
@@ -49,56 +84,32 @@ export default function Home() {
     }
   });
 
-  const [categories] = useState(() => {
-    try {
-      const savedCats = localStorage.getItem("shopCategories");
-      return savedCats ? JSON.parse(savedCats) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  const [featuredProducts] = useState(() => {
-    try {
-      const allProds = JSON.parse(localStorage.getItem("shopProducts") || "[]");
-      return allProds.slice(0, 4);
-    } catch {
-      return [];
-    }
-  });
-
-  // --- HELPER: FORMATEADOR DE PRECIO COLOMBIANO ---
-  const formatPrice = (price) => {
-    return new Intl.NumberFormat("es-CO", {
-      style: "currency",
-      currency: "COP",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(price);
-  };
-
-  // --- 2. LÓGICA DEL CARRUSEL ---
+  // Lógica del Carrusel
   const [currentSlide, setCurrentSlide] = useState(0);
-
-  const prevSlide = () => {
+  const prevSlide = () =>
     setCurrentSlide((curr) => (curr === 0 ? banners.length - 1 : curr - 1));
-  };
-
-  const nextSlide = () => {
+  const nextSlide = () =>
     setCurrentSlide((curr) => (curr + 1) % banners.length);
-  };
 
   useEffect(() => {
     if (!banners || banners.length <= 1) return;
-    const interval = setInterval(() => {
-      setCurrentSlide((prev) => (prev + 1) % banners.length);
-    }, 5000);
+    const interval = setInterval(
+      () => setCurrentSlide((prev) => (prev + 1) % banners.length),
+      5000
+    );
     return () => clearInterval(interval);
-  }, [banners, currentSlide]);
-
-  if (!banners || banners.length === 0) return null;
+  }, [banners]);
 
   const activeBanner = banners[currentSlide] || banners[0];
+
+  // --- RENDERIZADO ---
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-slate-900"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-slate-50 min-h-screen pb-20 font-sans">
@@ -117,7 +128,6 @@ export default function Home() {
 
       {/* 1. HERO BANNER */}
       <div className="bg-slate-900 text-white relative overflow-hidden h-[400px] md:h-[500px] group">
-        {/* Fondo con imagen */}
         <div className="absolute inset-0 transition-all duration-700 ease-in-out">
           {activeBanner.image ? (
             <img
@@ -132,7 +142,6 @@ export default function Home() {
           <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-transparent to-transparent"></div>
         </div>
 
-        {/* Contenido Texto */}
         <div className="relative z-10 h-full flex flex-col items-center justify-center text-center px-12 md:px-20 animate-in slide-in-from-bottom-8 duration-500">
           <h1 className="text-4xl md:text-6xl font-black mb-4 tracking-tighter drop-shadow-lg max-w-4xl">
             {activeBanner.title}
@@ -142,12 +151,11 @@ export default function Home() {
           </p>
           <Link to={activeBanner.link || "/productos"}>
             <button className="bg-red-600 text-white px-8 py-4 rounded-full font-bold hover:bg-red-700 transition shadow-lg shadow-red-600/30 transform hover:scale-105 active:scale-95">
-              {activeBanner.btnText || "Ver más"}
+              {activeBanner.btnText || "Ver Productos"}
             </button>
           </Link>
         </div>
 
-        {/* Flechas de Navegación */}
         {banners.length > 1 && (
           <>
             <button
@@ -156,35 +164,30 @@ export default function Home() {
             >
               <ChevronLeft size={28} />
             </button>
-
             <button
               onClick={nextSlide}
               className="absolute right-4 top-1/2 -translate-y-1/2 z-20 p-3 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-white hover:bg-white/30 hover:scale-110 transition-all duration-300 opacity-0 group-hover:opacity-100 shadow-lg"
             >
               <ChevronRight size={28} />
             </button>
+            <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-2 z-20">
+              {banners.map((_, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setCurrentSlide(idx)}
+                  className={`h-1.5 rounded-full transition-all duration-300 shadow-sm ${
+                    currentSlide === idx
+                      ? "w-8 bg-red-600"
+                      : "w-2 bg-white/50 hover:bg-white"
+                  }`}
+                />
+              ))}
+            </div>
           </>
-        )}
-
-        {/* Puntos Indicadores */}
-        {banners.length > 1 && (
-          <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-2 z-20">
-            {banners.map((_, idx) => (
-              <button
-                key={idx}
-                onClick={() => setCurrentSlide(idx)}
-                className={`h-1.5 rounded-full transition-all duration-300 shadow-sm ${
-                  currentSlide === idx
-                    ? "w-8 bg-red-600"
-                    : "w-2 bg-white/50 hover:bg-white"
-                }`}
-              />
-            ))}
-          </div>
         )}
       </div>
 
-      {/* 2. SECCIÓN DE CATEGORÍAS */}
+      {/* 2. SECCIÓN DE CATEGORÍAS (DESDE FIREBASE) */}
       <div className="container mx-auto px-4 -mt-10 relative z-10">
         <div className="bg-white rounded-3xl p-8 shadow-xl shadow-slate-200/50 border border-slate-100">
           <div className="flex justify-between items-end mb-8">
@@ -229,16 +232,16 @@ export default function Home() {
                 </div>
               </Link>
             ))}
-            {categories.length === 0 && (
+            {categories.length === 0 && !loading && (
               <div className="col-span-full text-center text-slate-400 py-4">
-                No hay categorías configuradas aún.
+                No hay categorías disponibles.
               </div>
             )}
           </div>
         </div>
       </div>
 
-      {/* 3. PRODUCTOS DESTACADOS */}
+      {/* 3. PRODUCTOS DESTACADOS (DESDE FIREBASE) */}
       <div className="container mx-auto px-4 py-16">
         <div className="flex items-center gap-4 mb-8">
           <h2 className="text-2xl font-bold text-slate-800">Tendencias</h2>
@@ -248,47 +251,16 @@ export default function Home() {
         </div>
 
         {featuredProducts.length > 0 ? (
+          // AQUÍ IMPLEMENTAMOS TU NUEVO DISEÑO DE TARJETAS
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
             {featuredProducts.map((product) => (
-              <Link
-                to={`/producto/${product.id}`}
-                key={product.id}
-                className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group"
-              >
-                <div className="aspect-square bg-slate-50 rounded-xl mb-4 relative overflow-hidden flex items-center justify-center p-4">
-                  {product.images && product.images[0] ? (
-                    <img
-                      src={product.images[0]}
-                      alt={product.title}
-                      className="w-full h-full object-contain mix-blend-multiply group-hover:scale-110 transition-transform duration-500"
-                    />
-                  ) : (
-                    <span className="text-slate-300 font-bold">Sin foto</span>
-                  )}
-
-                  {/* --- AQUÍ APLICAMOS LA MEJORA DEL PRECIO --- */}
-                  <div className="absolute top-2 left-2 bg-slate-900/80 text-white text-xs font-bold px-2 py-1 rounded-md backdrop-blur-sm shadow-sm">
-                    {formatPrice(product.price)}
-                  </div>
-
-                  <div className="absolute bottom-2 right-2 bg-white p-2 rounded-full shadow-md opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0 transition-all">
-                    <ShoppingCart size={16} className="text-slate-800" />
-                  </div>
-                </div>
-                <h3 className="font-bold text-slate-700 truncate mb-1">
-                  {product.title}
-                </h3>
-                <div className="flex items-center gap-1 text-yellow-400 text-xs">
-                  <Star size={12} fill="currentColor" /> <span>4.8</span>{" "}
-                  <span className="text-slate-300 ml-1">(24)</span>
-                </div>
-              </Link>
+              <ProductCard key={product.id} product={product} />
             ))}
           </div>
         ) : (
           <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-slate-200">
             <p className="text-slate-400">
-              Aún no hay productos destacados. Ve al admin para empezar.
+              No se encontraron productos destacados en la nube.
             </p>
           </div>
         )}

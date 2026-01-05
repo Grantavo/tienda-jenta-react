@@ -1,23 +1,21 @@
-import React, { useState, useEffect } from "react";
-import {
-  Search,
-  Plus,
-  Trash2,
-  Edit2,
-  Shield,
-  Check,
-  X,
-  Key,
-  User,
-  Lock,
-} from "lucide-react";
+import React, { useState, useEffect, useCallback } from "react";
+import { Plus, Trash2, Edit2, Shield, Check, X, Key, Lock } from "lucide-react";
 
-// --- ZONA SEGURA (Fuera del componente) ---
-// Al estar aquí, el linter de React sabe que esto no afecta el renderizado visual.
-const generateId = () => Date.now();
+// IMPORTAR FIREBASE
+import { db } from "../../firebase/config";
+import {
+  collection,
+  getDocs,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+  setDoc,
+} from "firebase/firestore";
+
+// --- ZONA SEGURA (CONSTANTES) ---
 const getTodayDate = () => new Date().toISOString().split("T")[0];
 
-// LISTA MAESTRA DE MÓDULOS
 const APP_MODULES = [
   { id: "dashboard", label: "Dashboard (Ver Métricas)" },
   { id: "pedidos", label: "Gestión de Pedidos" },
@@ -29,146 +27,216 @@ const APP_MODULES = [
   { id: "ajustes", label: "Configuración de Tienda" },
 ];
 
+const SUPER_ADMIN_ROLE_DATA = {
+  name: "Administrador del sistema",
+  permissions: APP_MODULES.map((m) => m.id),
+  isSystem: true,
+};
+const SUPER_ADMIN_ID = "super_admin";
+
+const DEFAULT_ADMIN_USER = {
+  name: "Admin Principal",
+  email: "admin@admin.com",
+  password: "123",
+  roleId: SUPER_ADMIN_ID,
+  createdAt: getTodayDate(),
+  isSystem: true,
+};
+
 export default function Users() {
-  // --- 1. DATOS INICIALES ---
-  const [roles, setRoles] = useState(() => {
-    const saved = localStorage.getItem("shopRoles");
-    if (saved) return JSON.parse(saved);
-    return [
-      {
-        id: "role_admin",
-        name: "Super Admin",
-        permissions: APP_MODULES.map((m) => m.id),
-        isSystem: true,
-      },
-      {
-        id: "role_vendedor",
-        name: "Vendedor",
-        permissions: ["pedidos", "clientes"],
-        isSystem: false,
-      },
-    ];
-  });
+  const [roles, setRoles] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const [users, setUsers] = useState(() => {
-    const saved = localStorage.getItem("shopUsers");
-    if (saved) return JSON.parse(saved);
+  // 1. CARGAR DATOS (Corregido: sin dependencias externas)
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      // Definimos las referencias DENTRO para que useCallback no pida dependencias
+      const usersRef = collection(db, "users");
+      const rolesRef = collection(db, "roles");
 
-    // Usamos las funciones externas
-    return [
-      {
-        id: 1,
-        name: "Super Admin",
-        email: "admin@genta.com",
-        password: "123",
-        roleId: "role_admin",
-        createdAt: getTodayDate(),
-        isSystem: true,
-      },
-    ];
-  });
+      const [usersSnap, rolesSnap] = await Promise.all([
+        getDocs(usersRef),
+        getDocs(rolesRef),
+      ]);
 
-  // --- 2. ESTADOS ---
+      let usersData = usersSnap.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      let rolesData = rolesSnap.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      // A. ASEGURAR ROL SUPER ADMIN
+      const adminExists = rolesData.find((r) => r.id === SUPER_ADMIN_ID);
+
+      if (!adminExists) {
+        console.log("⚠️ Rol Super Admin no encontrado. Creándolo...");
+        await setDoc(doc(db, "roles", SUPER_ADMIN_ID), SUPER_ADMIN_ROLE_DATA);
+        rolesData.unshift({ id: SUPER_ADMIN_ID, ...SUPER_ADMIN_ROLE_DATA });
+      } else {
+        const allPermissions = APP_MODULES.map((m) => m.id);
+        // Validamos si permissions existe antes de ordenar para evitar errores
+        const currentPerms = adminExists.permissions || [];
+
+        if (
+          JSON.stringify(currentPerms.sort()) !==
+          JSON.stringify(allPermissions.sort())
+        ) {
+          await updateDoc(doc(db, "roles", SUPER_ADMIN_ID), {
+            permissions: allPermissions,
+          });
+          rolesData = rolesData.map((r) =>
+            r.id === SUPER_ADMIN_ID ? { ...r, permissions: allPermissions } : r
+          );
+        }
+      }
+
+      // B. ASEGURAR USUARIO MAESTRO
+      if (usersData.length === 0) {
+        console.log("⚠️ BD vacía. Creando usuario por defecto...");
+        const newUserRef = await addDoc(usersRef, DEFAULT_ADMIN_USER);
+        usersData.push({ id: newUserRef.id, ...DEFAULT_ADMIN_USER });
+        alert(
+          `Usuario Maestro Creado:\nEmail: ${DEFAULT_ADMIN_USER.email}\nPass: ${DEFAULT_ADMIN_USER.password}`
+        );
+      }
+
+      // Ordenar roles
+      rolesData.sort((a, b) => (b.isSystem === true) - (a.isSystem === true));
+
+      setUsers(usersData);
+      setRoles(rolesData);
+
+      localStorage.setItem("shopRoles", JSON.stringify(rolesData));
+      localStorage.setItem("shopUsers", JSON.stringify(usersData));
+    } catch (error) {
+      console.error("Error cargando datos:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, []); // Array vacío = No depende de nada externo
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]); // fetchData es estable gracias a useCallback
+
+  // --- ESTADOS VISUALES ---
   const [activeTab, setActiveTab] = useState("users");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
 
-  // Formularios
   const initialUserForm = { name: "", email: "", password: "", roleId: "" };
   const initialRoleForm = { name: "", permissions: [] };
 
   const [userForm, setUserForm] = useState(initialUserForm);
   const [roleForm, setRoleForm] = useState(initialRoleForm);
 
-  // --- 3. PERSISTENCIA ---
-  useEffect(() => {
-    localStorage.setItem("shopRoles", JSON.stringify(roles));
-  }, [roles]);
-  useEffect(() => {
-    localStorage.setItem("shopUsers", JSON.stringify(users));
-  }, [users]);
-
-  // --- 4. LÓGICA USUARIOS ---
-  const handleSaveUser = (e) => {
+  // --- LÓGICA USUARIOS ---
+  const handleSaveUser = async (e) => {
     e.preventDefault();
+    try {
+      const userData = {
+        name: userForm.name,
+        email: userForm.email,
+        roleId: userForm.roleId,
+        ...(userForm.password ? { password: userForm.password } : {}),
+        updatedAt: new Date(),
+      };
 
-    if (editingId) {
-      // Editar
-      setUsers(
-        users.map((u) =>
-          u.id === editingId
-            ? { ...u, ...userForm, password: userForm.password || u.password }
-            : u
-        )
-      );
-    } else {
-      // Crear
-      if (!userForm.password) return alert("La contraseña es obligatoria");
-
-      // SOLUCIÓN FINAL: Llamamos a las funciones externas
-      setUsers([
-        ...users,
-        {
-          ...userForm,
-          id: generateId(), // <--- Función externa
-          createdAt: getTodayDate(), // <--- Función externa
+      if (editingId) {
+        const userRef = doc(db, "users", editingId);
+        await updateDoc(userRef, userData);
+        alert("Usuario actualizado ✅");
+      } else {
+        if (!userForm.password) return alert("La contraseña es obligatoria");
+        await addDoc(collection(db, "users"), {
+          // Usamos collection directo
+          ...userData,
+          createdAt: getTodayDate(),
           isSystem: false,
-        },
-      ]);
+        });
+        alert("Usuario creado exitosamente 🚀");
+      }
+      closeModal();
+      fetchData();
+    } catch (error) {
+      console.error("Error:", error);
+      alert("Error al guardar");
     }
-    closeModal();
   };
 
-  const deleteUser = (id, isSystem) => {
-    if (isSystem)
-      return alert("No puedes eliminar al Super Admin del sistema.");
+  const deleteUser = async (id) => {
+    const userToDelete = users.find((u) => u.id === id);
+    // Verificamos el rol para ver si es del sistema
+    const userRole = roles.find((r) => r.id === userToDelete?.roleId);
+
+    if (userRole?.isSystem) {
+      return alert("No puedes eliminar a un usuario con rol de Sistema.");
+    }
+
     if (
       window.confirm("¿Eliminar usuario? Perderá el acceso inmediatamente.")
     ) {
-      setUsers(users.filter((u) => u.id !== id));
+      try {
+        await deleteDoc(doc(db, "users", id));
+        fetchData();
+      } catch (error) {
+        console.error("Error eliminando:", error);
+      }
     }
   };
 
-  // --- 5. LÓGICA ROLES ---
-  const handleSaveRole = (e) => {
+  // --- LÓGICA ROLES ---
+  const handleSaveRole = async (e) => {
     e.preventDefault();
-
-    if (editingId) {
-      // Editar Rol
-      setRoles(
-        roles.map((r) =>
-          r.id === editingId
-            ? { ...r, name: roleForm.name, permissions: roleForm.permissions }
-            : r
-        )
-      );
-    } else {
-      // Crear Rol
-      const newRoleId = `role_${generateId()}`; // <--- Función externa
-
-      setRoles([
-        ...roles,
-        {
-          ...roleForm,
-          id: newRoleId,
+    try {
+      const roleData = {
+        name: roleForm.name,
+        permissions: roleForm.permissions,
+      };
+      if (editingId) {
+        const roleRef = doc(db, "roles", editingId);
+        await updateDoc(roleRef, roleData);
+        alert("Rol actualizado ✅");
+      } else {
+        await addDoc(collection(db, "roles"), {
+          // Usamos collection directo
+          ...roleData,
           isSystem: false,
-        },
-      ]);
+        });
+        alert("Rol creado exitosamente 🚀");
+      }
+      closeModal();
+      fetchData();
+    } catch (error) {
+      console.error("Error:", error);
+      alert("Error al guardar rol");
     }
-    closeModal();
   };
 
-  const deleteRole = (id, isSystem) => {
-    if (isSystem)
+  const deleteRole = async (id) => {
+    const roleToDelete = roles.find((r) => r.id === id);
+    if (roleToDelete?.isSystem) {
       return alert("Este rol es vital para el sistema. No se puede borrar.");
+    }
+
     const usersInRole = users.filter((u) => u.roleId === id);
     if (usersInRole.length > 0)
       return alert(
         `No puedes borrar este rol porque hay ${usersInRole.length} usuarios usándolo.`
       );
 
-    if (window.confirm("¿Eliminar Rol?")) {
-      setRoles(roles.filter((r) => r.id !== id));
+    if (window.confirm("¿Eliminar Rol de la nube?")) {
+      try {
+        await deleteDoc(doc(db, "roles", id));
+        fetchData();
+      } catch (error) {
+        console.error("Error eliminando rol:", error);
+      }
     }
   };
 
@@ -184,7 +252,7 @@ export default function Users() {
     }
   };
 
-  // --- AUXILIARES ---
+  // --- UI HELPERS ---
   const openEditUser = (user) => {
     setUserForm({
       name: user.name,
@@ -200,7 +268,7 @@ export default function Users() {
   const openEditRole = (role) => {
     if (role.isSystem)
       return alert(
-        "El rol Super Admin tiene todos los permisos por defecto y no se debe editar."
+        "El rol de Sistema tiene permisos automáticos y no debe editarse manualmente."
       );
     setRoleForm({ name: role.name, permissions: role.permissions });
     setEditingId(role.id);
@@ -215,16 +283,24 @@ export default function Users() {
     setRoleForm(initialRoleForm);
   };
 
-  // --- RENDER ---
+  if (loading) {
+    return (
+      <div className="p-8 text-center text-slate-400">
+        Cargando gestión de acceso...
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
+      {/* HEADER */}
       <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">
             Gestión de Acceso
           </h1>
           <p className="text-sm text-slate-500">
-            Administra quién puede entrar y qué puede ver.
+            Administra quién puede entrar y qué puede ver (Nube ☁️).
           </p>
         </div>
         <div className="flex bg-white rounded-lg p-1 border border-slate-200 shadow-sm">
@@ -276,12 +352,21 @@ export default function Users() {
             <tbody className="divide-y divide-slate-100">
               {users.map((user) => {
                 const userRole = roles.find((r) => r.id === user.roleId);
+                const isSystemRole = userRole?.isSystem;
                 return (
                   <tr key={user.id} className="hover:bg-slate-50">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 font-bold">
-                          {user.name.substring(0, 2).toUpperCase()}
+                        <div
+                          className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${
+                            isSystemRole
+                              ? "bg-green-100 text-green-700"
+                              : "bg-slate-100 text-slate-500"
+                          }`}
+                        >
+                          {user.name
+                            ? user.name.substring(0, 2).toUpperCase()
+                            : "??"}
                         </div>
                         <div>
                           <p className="font-bold text-slate-800">
@@ -294,7 +379,7 @@ export default function Users() {
                     <td className="px-6 py-4">
                       <span
                         className={`px-2 py-1 rounded text-xs font-bold border ${
-                          userRole?.isSystem
+                          isSystemRole
                             ? "bg-green-50 text-green-700 border-green-200"
                             : "bg-blue-50 text-blue-700 border-blue-200"
                         }`}
@@ -302,7 +387,7 @@ export default function Users() {
                         {userRole?.name || "Rol desconocido"}
                       </span>
                     </td>
-                    <td className="px-6 py-4">{user.createdAt}</td>
+                    <td className="px-6 py-4">{user.createdAt || "N/A"}</td>
                     <td className="px-6 py-4 text-right space-x-2">
                       <button
                         onClick={() => openEditUser(user)}
@@ -310,17 +395,16 @@ export default function Users() {
                       >
                         <Edit2 size={18} />
                       </button>
-                      {!user.isSystem && (
+                      {!isSystemRole ? (
                         <button
-                          onClick={() => deleteUser(user.id, user.isSystem)}
+                          onClick={() => deleteUser(user.id)}
                           className="text-red-400 hover:bg-red-50 p-2 rounded-full transition"
                         >
                           <Trash2 size={18} />
                         </button>
-                      )}
-                      {user.isSystem && (
+                      ) : (
                         <button
-                          title="Protegido"
+                          title="Protegido por Rol de Sistema"
                           className="text-slate-300 cursor-not-allowed p-2"
                         >
                           <Lock size={18} />
@@ -341,7 +425,9 @@ export default function Users() {
           {roles.map((role) => (
             <div
               key={role.id}
-              className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col relative group"
+              className={`bg-white rounded-xl shadow-sm border p-6 flex flex-col relative group ${
+                role.isSystem ? "border-green-200" : "border-slate-200"
+              }`}
             >
               <div className="flex justify-between items-start mb-4">
                 <div className="flex items-center gap-2">
@@ -351,7 +437,11 @@ export default function Users() {
                       role.isSystem ? "text-green-600" : "text-blue-600"
                     }
                   />
-                  <h3 className="font-bold text-lg text-slate-800">
+                  <h3
+                    className={`font-bold text-lg ${
+                      role.isSystem ? "text-green-800" : "text-slate-800"
+                    }`}
+                  >
                     {role.name}
                   </h3>
                 </div>
@@ -364,7 +454,7 @@ export default function Users() {
                       <Edit2 size={16} />
                     </button>
                     <button
-                      onClick={() => deleteRole(role.id, role.isSystem)}
+                      onClick={() => deleteRole(role.id)}
                       className="p-1 text-red-500 hover:bg-red-50 rounded"
                     >
                       <Trash2 size={16} />
@@ -372,8 +462,8 @@ export default function Users() {
                   </div>
                 )}
                 {role.isSystem && (
-                  <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded font-bold">
-                    Sistema
+                  <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded font-bold flex items-center gap-1">
+                    <Lock size={12} /> Sistema
                   </span>
                 )}
               </div>
@@ -383,10 +473,11 @@ export default function Users() {
               </p>
               <div className="flex flex-wrap gap-2 mb-4">
                 {role.isSystem ? (
-                  <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded">
-                    Acceso Total (Super Admin)
+                  <span className="text-xs bg-green-50 text-green-700 border border-green-200 px-2 py-1 rounded font-bold w-full text-center">
+                    ✨ Acceso Total a la Configuración
                   </span>
                 ) : (
+                  role.permissions &&
                   role.permissions.map((perm) => {
                     const mod = APP_MODULES.find((m) => m.id === perm);
                     return (
@@ -475,8 +566,12 @@ export default function Users() {
                   >
                     <option value="">Seleccione un rol...</option>
                     {roles.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.name}
+                      <option
+                        key={r.id}
+                        value={r.id}
+                        className={r.isSystem ? "font-bold text-green-700" : ""}
+                      >
+                        {r.name} {r.isSystem ? "(Sistema)" : ""}
                       </option>
                     ))}
                   </select>

@@ -12,7 +12,7 @@ import Login from "./pages/auth/Login";
 import Home from "./pages/Home";
 import CategoryPage from "./pages/shop/CategoryPage";
 import ProductDetail from "./pages/shop/ProductDetail";
-import ShopProducts from "./pages/shop/Products"; // <--- 1. NUEVA IMPORTACIÓN (Vista Cliente)
+import ShopProducts from "./pages/shop/Products";
 
 // Páginas Admin (Privadas)
 import Dashboard from "./pages/admin/Dashboard";
@@ -25,6 +25,7 @@ import Clients from "./pages/admin/Clients";
 import Users from "./pages/admin/Users";
 import Marketing from "./pages/admin/Marketing";
 import Payments from "./pages/admin/Payments";
+import Migration from "./pages/admin/Migration"; // <--- 1. NUEVA IMPORTACIÓN
 
 // --- GUARDIA DE SEGURIDAD ---
 const ProtectedRoute = ({ children }) => {
@@ -108,7 +109,6 @@ export default function App() {
           <Route index element={<Home />} />
           <Route path="categoria/:id" element={<CategoryPage />} />
           <Route path="producto/:id" element={<ProductDetail />} />
-          {/* 2. AQUÍ CONECTAMOS LA PÁGINA DE PRODUCTOS */}
           <Route path="productos" element={<ShopProducts />} />
         </Route>
 
@@ -133,6 +133,10 @@ export default function App() {
           <Route path="marketing" element={<Marketing />} />
           <Route path="pagos" element={<Payments />} />
           <Route path="ajustes" element={<ShopSettings />} />
+
+          {/* 2. RUTA TEMPORAL PARA MIGRACIÓN */}
+          <Route path="migrar" element={<Migration />} />
+
           {/* Placeholders */}
           <Route
             path="envios"

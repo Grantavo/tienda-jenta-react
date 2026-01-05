@@ -1,137 +1,184 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
-import { Filter } from "lucide-react";
+import { Filter, Layers, FolderOpen } from "lucide-react";
+
+// 1. IMPORTAR FIREBASE
+import { db } from "../../firebase/config";
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  doc,
+  getDoc,
+} from "firebase/firestore";
+
+// 2. IMPORTAR TARJETA MAESTRA
+import ProductCard from "../../components/ProductCard";
 
 export default function CategoryPage() {
-  const { id } = useParams(); // ID de la categoría actual (desde la URL)
+  const { id } = useParams();
 
-  // 1. CARGAR DATOS CRUDOS (Solo una vez)
-  const [data] = useState(() => {
-    try {
-      const allProducts = JSON.parse(
-        localStorage.getItem("shopProducts") || "[]"
-      );
-      const allCats = JSON.parse(
-        localStorage.getItem("shopCategories") || "[]"
-      );
-      return { allProducts, allCats };
-    } catch (e) {
-      // SOLUCIÓN: Usamos 'e' imprimiéndolo en consola para que ESLint no se queje
-      console.error("Error al cargar datos del almacenamiento:", e);
-      return { allProducts: [], allCats: [] };
-    }
+  // Estados de datos
+  const [products, setProducts] = useState([]);
+  const [category, setCategory] = useState({
+    name: "Cargando...",
+    subcategories: [],
   });
+  const [loading, setLoading] = useState(true);
 
-  // 2. LÓGICA DERIVADA (Calculada al vuelo)
+  // Estado del filtro activo (inicia viendo 'todo')
+  const [activeSubcat, setActiveSubcat] = useState("all");
 
-  // A. Buscar nombre de la categoría
-  const currentCat = data.allCats.find((c) => c.id == id);
-  const categoryName = currentCat ? currentCat.name : "Categoría Desconocida";
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        // A. OBTENER DATOS DE LA CATEGORÍA (Nombre y Subcategorías)
+        const catRef = doc(db, "categories", id);
+        const catSnap = await getDoc(catRef);
 
-  // B. Filtrar productos
-  const products = data.allProducts.filter((p) => p.categoryId == id);
+        if (catSnap.exists()) {
+          setCategory(catSnap.data());
+        } else {
+          setCategory({ name: "Categoría no encontrada", subcategories: [] });
+        }
 
-  // --- RENDERIZADO ---
+        // B. OBTENER PRODUCTOS DE ESTA CATEGORÍA (Desde Firebase)
+        // Nota: Convertimos id a string por seguridad
+        const q = query(
+          collection(db, "products"),
+          where("categoryId", "==", id.toString())
+        );
+        const querySnapshot = await getDocs(q);
+
+        const prodsData = querySnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+
+        setProducts(prodsData);
+      } catch (error) {
+        console.error("Error cargando categoría:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (id) {
+      fetchData();
+      setActiveSubcat("all"); // Resetear filtro al cambiar de categoría
+    }
+  }, [id]);
+
+  // --- C. FILTRADO LOCAL (Ya con los datos descargados) ---
+  const filteredProducts =
+    activeSubcat === "all"
+      ? products
+      : products.filter((p) => p.subcategoryId == activeSubcat); // Usamos == para evitar error de tipo string/number
+
   return (
     <div className="bg-slate-50 min-h-screen py-10 px-4">
       <div className="container mx-auto max-w-6xl">
-        {/* Header de Categoría */}
-        <div className="flex items-center gap-3 mb-8 animate-in slide-in-from-left duration-500">
-          <div className="p-3 bg-blue-600 rounded-xl text-white shadow-lg shadow-blue-600/30">
-            <Filter size={24} />
-          </div>
-          <div>
-            <h1 className="text-3xl font-bold text-slate-800">
-              {categoryName}
-            </h1>
-            <p className="text-slate-500">
-              Mostrando {products.length} productos disponibles
-            </p>
+        {/* --- HEADER --- */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8 animate-in slide-in-from-left duration-500">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-blue-600 rounded-xl text-white shadow-lg shadow-blue-600/30">
+              <Filter size={24} />
+            </div>
+            <div>
+              <h1 className="text-3xl font-bold text-slate-800">
+                {category.name}
+              </h1>
+              <p className="text-slate-500 text-sm">
+                {loading
+                  ? "Cargando..."
+                  : `Mostrando ${filteredProducts.length} productos`}
+              </p>
+            </div>
           </div>
         </div>
 
-        {/* Grid de Productos */}
-        {products.length === 0 ? (
+        {/* --- BARRA DE SUBCATEGORÍAS --- */}
+        {!loading &&
+          category.subcategories &&
+          category.subcategories.length > 0 && (
+            <div className="mb-8 overflow-x-auto pb-2 custom-scrollbar">
+              <div className="flex gap-2">
+                {/* Botón Ver Todo */}
+                <button
+                  onClick={() => setActiveSubcat("all")}
+                  className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-all border ${
+                    activeSubcat === "all"
+                      ? "bg-slate-800 text-white border-slate-800 shadow-md"
+                      : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                  }`}
+                >
+                  Ver Todo
+                </button>
+
+                {/* Botones Dinámicos desde Firebase */}
+                {category.subcategories.map((sub) => (
+                  <button
+                    key={sub.id}
+                    onClick={() => setActiveSubcat(sub.id)}
+                    className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-all border flex items-center gap-2 ${
+                      activeSubcat === sub.id
+                        ? "bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-500/30"
+                        : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                    }`}
+                  >
+                    {activeSubcat === sub.id && <Layers size={14} />}
+                    {sub.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+        {/* --- GRID DE PRODUCTOS --- */}
+        {loading ? (
+          <div className="py-20 text-center flex flex-col items-center">
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mb-4"></div>
+            <p className="text-slate-400">Buscando productos en la nube...</p>
+          </div>
+        ) : filteredProducts.length === 0 ? (
+          // Estado Vacío
           <div className="text-center py-20 bg-white rounded-2xl border border-slate-200 border-dashed">
-            <p className="text-slate-400 text-lg">
-              No hay productos en esta categoría aún.
+            <FolderOpen size={48} className="mx-auto text-slate-300 mb-4" />
+            <h3 className="text-xl font-bold text-slate-600 mb-2">
+              No hay productos aquí
+            </h3>
+            <p className="text-slate-400 mb-4">
+              {activeSubcat !== "all"
+                ? "Intenta seleccionar otra subcategoría o ver todo."
+                : "Esta categoría aún no tiene productos registrados."}
             </p>
-            <Link
-              to="/"
-              className="text-blue-600 font-bold hover:underline mt-2 inline-block"
-            >
-              Volver al inicio
-            </Link>
+            {activeSubcat !== "all" && (
+              <button
+                onClick={() => setActiveSubcat("all")}
+                className="text-blue-600 font-bold hover:underline"
+              >
+                Ver todos los productos de {category.name}
+              </button>
+            )}
           </div>
         ) : (
+          // Grid de Tarjetas (Usando tu diseño visual correcto)
           <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
-            {products.map((p) => (
-              <Link
-                to={`/producto/${p.id}`}
-                key={p.id}
-                className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm hover:shadow-xl transition-all group duration-300"
-              >
-                {/* Imagen */}
-                <div className="aspect-square bg-slate-100 rounded-xl mb-4 overflow-hidden relative">
-                  {p.images[0] ? (
-                    <img
-                      src={p.images[0]}
-                      alt={p.title}
-                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-slate-300 font-bold">
-                      Sin Foto
-                    </div>
-                  )}
-
-                  {/* Etiqueta Agotado */}
-                  {parseInt(p.stock) <= 0 && (
-                    <span className="absolute inset-0 bg-white/80 flex items-center justify-center font-bold text-slate-500 backdrop-blur-sm">
-                      AGOTADO
-                    </span>
-                  )}
-
-                  {/* Etiqueta Oferta */}
-                  {p.oldPrice > p.price && (
-                    <span className="absolute top-2 right-2 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full shadow-md">
-                      Oferta
-                    </span>
-                  )}
-                </div>
-
-                {/* Info */}
-                <div>
-                  <p className="text-xs text-slate-400 mb-1">
-                    {p.brand || "Genérica"}
-                  </p>
-                  <h3 className="font-bold text-slate-800 mb-2 truncate text-lg group-hover:text-blue-600 transition-colors">
-                    {p.title}
-                  </h3>
-                  <div className="flex items-center gap-2">
-                    <p className="text-blue-600 font-black text-xl">
-                      {new Intl.NumberFormat("es-CO", {
-                        style: "currency",
-                        currency: "COP",
-                        maximumFractionDigits: 0,
-                      }).format(p.price)}
-                    </p>
-                    {p.oldPrice > p.price && (
-                      <p className="text-sm text-slate-400 line-through">
-                        {new Intl.NumberFormat("es-CO", {
-                          style: "currency",
-                          currency: "COP",
-                          maximumFractionDigits: 0,
-                        }).format(p.oldPrice)}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </Link>
+            {filteredProducts.map((p) => (
+              <ProductCard key={p.id} product={p} />
             ))}
           </div>
         )}
       </div>
+
+      {/* Estilo inline para el scrollbar horizontal */}
+      <style jsx>{`
+        .custom-scrollbar::-webkit-scrollbar { height: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+      `}</style>
     </div>
   );
 }

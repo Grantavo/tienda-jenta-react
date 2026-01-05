@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useParams, useNavigate, useOutletContext } from "react-router-dom"; // <--- 1. IMPORTAMOS EL CONTEXTO
+import { useParams, useNavigate, useOutletContext } from "react-router-dom";
 import {
   ShoppingCart,
   MessageCircle,
@@ -9,38 +9,27 @@ import {
   Plus,
 } from "lucide-react";
 
+// 1. IMPORTAR FIREBASE
+import { db } from "../../firebase/config";
+import { doc, getDoc } from "firebase/firestore";
+
 export default function ProductDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-
-  // <--- 2. RECUPERAMOS LA FUNCIÓN DEL LAYOUT PADRE
   const { addToCart } = useOutletContext();
 
-  // 1. CARGA DE DATOS (Tu lógica original optimizada)
+  // Estados
+  const [product, setProduct] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  // A. Producto
-  const [product] = useState(() => {
-    try {
-      const allProducts = JSON.parse(
-        localStorage.getItem("shopProducts") || "[]"
-      );
-      // Usamos '==' para que coincida string con number si es necesario
-      return allProducts.find((p) => p.id == id) || null;
-    } catch (error) {
-      console.error("Error cargando producto:", error);
-      return null;
-    }
-  });
-
-  // B. Teléfono
+  // Teléfono (Mantenemos tu lógica de localStorage para config general, o podrías migrarla luego)
   const [shopPhone] = useState(() => {
     try {
       const settings = JSON.parse(localStorage.getItem("shopSettings") || "{}");
       return settings.phone
         ? settings.phone.replace(/\D/g, "")
         : "573000000000";
-    } catch (error) {
-      console.error("Error leyendo teléfono:", error);
+    } catch {
       return "573000000000";
     }
   });
@@ -49,19 +38,36 @@ export default function ProductDetail() {
   const [activeImage, setActiveImage] = useState(0);
   const [quantity, setQuantity] = useState(1);
 
-  // 2. EFECTOS VISUALES
-
-  // Scroll arriba al entrar
+  // 2. EFECTO: CARGAR PRODUCTO DESDE FIREBASE
   useEffect(() => {
-    window.scrollTo(0, 0);
+    const fetchProduct = async () => {
+      setLoading(true);
+      try {
+        const docRef = doc(db, "products", id);
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+          setProduct({ id: docSnap.id, ...docSnap.data() });
+        } else {
+          setProduct(null);
+        }
+      } catch (error) {
+        console.error("Error cargando producto:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (id) fetchProduct();
+    window.scrollTo(0, 0); // Scroll arriba al cambiar de producto
   }, [id]);
 
   // Carrusel Automático
   useEffect(() => {
     if (!product) return;
-
-    // Solo rotar si hay más de 1 imagen válida
-    const validImages = product.images.filter((img) => img);
+    const validImages = product.images
+      ? product.images.filter((img) => img)
+      : [];
     if (validImages.length <= 1) return;
 
     const interval = setInterval(() => {
@@ -72,6 +78,14 @@ export default function ProductDetail() {
   }, [product]);
 
   // --- RENDERIZADO ---
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-slate-900"></div>
+      </div>
+    );
+  }
 
   if (!product) {
     return (
@@ -89,20 +103,22 @@ export default function ProductDetail() {
     );
   }
 
-  // Lógica WhatsApp
+  // Helpers y Cálculos
+  const validImages = product.images ? product.images.filter((img) => img) : [];
+  const price = Number(product.price) || 0;
+  const oldPrice = Number(product.oldPrice) || 0;
+
   const handleWhatsApp = () => {
     const message = `Hola, me interesa el producto: *${
       product.title
     }* que vi en la web por $${new Intl.NumberFormat("es-CO").format(
-      product.price
+      price
     )}. ¿Está disponible?`;
     window.open(
       `https://wa.me/${shopPhone}?text=${encodeURIComponent(message)}`,
       "_blank"
     );
   };
-
-  const validImages = product.images.filter((img) => img);
 
   return (
     <div className="bg-white min-h-screen pb-20 pt-6">
@@ -137,14 +153,9 @@ export default function ProductDetail() {
               )}
 
               {/* Badge Descuento */}
-              {product.oldPrice > product.price && (
+              {oldPrice > price && (
                 <span className="absolute top-4 right-4 bg-red-600 text-white font-bold px-3 py-1 rounded-full shadow-lg z-10">
-                  -
-                  {Math.round(
-                    ((product.oldPrice - product.price) / product.oldPrice) *
-                      100
-                  )}
-                  %
+                  -{Math.round(((oldPrice - price) / oldPrice) * 100)}%
                 </span>
               )}
             </div>
@@ -189,15 +200,15 @@ export default function ProductDetail() {
                   style: "currency",
                   currency: "COP",
                   maximumFractionDigits: 0,
-                }).format(product.price)}
+                }).format(price)}
               </span>
-              {product.oldPrice > product.price && (
+              {oldPrice > price && (
                 <span className="text-xl text-slate-400 line-through mb-1 font-medium">
                   {new Intl.NumberFormat("es-CO", {
                     style: "currency",
                     currency: "COP",
                     maximumFractionDigits: 0,
-                  }).format(product.oldPrice)}
+                  }).format(oldPrice)}
                 </span>
               )}
             </div>
@@ -246,7 +257,7 @@ export default function ProductDetail() {
                 </span>
                 <button
                   onClick={() =>
-                    setQuantity((q) => Math.min(product.stock, q + 1))
+                    setQuantity((q) => Math.min(Number(product.stock), q + 1))
                   }
                   className="p-3 hover:bg-slate-100 text-slate-600 transition"
                 >
@@ -257,9 +268,8 @@ export default function ProductDetail() {
 
             {/* Botones de Acción */}
             <div className="space-y-3">
-              {/* <--- 3. AQUÍ CONECTAMOS EL BOTÓN AL CARRITO */}
               <button
-                onClick={() => addToCart(product)}
+                onClick={() => addToCart({ ...product, quantity })}
                 className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-black transition shadow-xl hover:shadow-2xl transform hover:-translate-y-1"
               >
                 <ShoppingCart size={20} /> Agregar al Carrito

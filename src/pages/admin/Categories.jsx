@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react"; // <--- 1. IMPORTAMOS useCallback
 import {
   Plus,
   Edit2,
@@ -9,38 +9,44 @@ import {
   ChevronDown,
 } from "lucide-react";
 
+import { db } from "../../firebase/config";
+import {
+  collection,
+  getDocs,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+} from "firebase/firestore";
+
 export default function Categories() {
-  // 1. ESTADO: Leemos de la memoria al iniciar
-  const [categories, setCategories] = useState(() => {
-    const saved = localStorage.getItem("shopCategories");
-    if (saved) return JSON.parse(saved);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true); // <--- Inicia en true para evitar parpadeos
 
-    // Datos por defecto si es la primera vez
-    return [
-      {
-        id: 1,
-        name: "Tecnología",
-        image: null,
-        subcategories: [
-          { id: 101, name: "Celulares" },
-          { id: 102, name: "Laptops" },
-        ],
-      },
-      {
-        id: 2,
-        name: "Hogar",
-        image: null,
-        subcategories: [],
-      },
-    ];
-  });
+  // Referencia a la colección
+  const catCollection = collection(db, "categories");
 
-  // 2. EFECTO MAGICO: Guardar en memoria cada vez que cambia algo
+  // --- 2. SOLUCIÓN AL ERROR: USAR useCallback ---
+  // Envolvemos la función en useCallback para que sea estable y no cause re-renders
+  const fetchCategories = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await getDocs(collection(db, "categories")); // Usamos collection directo aquí por seguridad
+      const cats = data.docs.map((doc) => ({ ...doc.data(), id: doc.id }));
+      setCategories(cats);
+      localStorage.setItem("shopCategories", JSON.stringify(cats));
+    } catch (error) {
+      console.error("Error cargando categorías:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, []); // Array vacío: la función no depende de variables externas cambiantes
+
   useEffect(() => {
-    localStorage.setItem("shopCategories", JSON.stringify(categories));
-  }, [categories]);
+    fetchCategories();
+  }, [fetchCategories]); // Ahora es seguro ponerla como dependencia
 
-  // --- (El resto de la lógica de modales sigue igual) ---
+  // --- (El resto de la lógica sigue igual) ---
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState("");
   const [currentItem, setCurrentItem] = useState(null);
@@ -87,83 +93,102 @@ export default function Categories() {
     }
   };
 
-  const handleAdd = (e) => {
+  // --- LOGICA DE GUARDAR ---
+  const handleAdd = async (e) => {
     e.preventDefault();
-    if (modalType === "addCategory") {
-      const newCat = {
-        id: Date.now(),
-        name: catNameRef.current.value,
-        image: imagePreview,
-        subcategories: [],
-      };
-      setCategories([...categories, newCat]);
-    } else if (modalType === "addSub") {
-      const parentId = parseInt(parentSelectRef.current.value);
-      const newSub = { id: Date.now(), name: subNameRef.current.value };
-      setCategories((cats) =>
-        cats.map((cat) =>
-          cat.id === parentId
-            ? { ...cat, subcategories: [...cat.subcategories, newSub] }
-            : cat
-        )
-      );
-    }
-    closeModal();
-  };
 
-  const handleUpdate = (e) => {
-    e.preventDefault();
-    if (modalType === "editCategory") {
-      setCategories((cats) =>
-        cats.map((cat) =>
-          cat.id === currentItem.id
-            ? { ...cat, name: catNameRef.current.value, image: imagePreview }
-            : cat
-        )
-      );
-    } else if (modalType === "editSub") {
-      setCategories((cats) =>
-        cats.map((cat) => {
-          if (cat.id === currentItem.parentId) {
-            return {
-              ...cat,
-              subcategories: cat.subcategories.map((sub) =>
-                sub.id === currentItem.id
-                  ? { ...sub, name: subNameRef.current.value }
-                  : sub
-              ),
-            };
-          }
-          return cat;
-        })
-      );
-    }
-    closeModal();
-  };
+    try {
+      if (modalType === "addCategory") {
+        const newCat = {
+          name: catNameRef.current.value,
+          image: imagePreview || null,
+          subcategories: [],
+        };
+        await addDoc(catCollection, newCat);
+        alert("Categoría creada en la nube ☁️");
+      } else if (modalType === "addSub") {
+        const parentId = parentSelectRef.current.value;
+        const parentCat = categories.find((c) => c.id === parentId);
 
-  const handleConfirmDelete = () => {
-    if (modalType === "delete") {
-      if (currentItem.parentId) {
-        setCategories((cats) =>
-          cats.map((cat) => {
-            if (cat.id === currentItem.parentId) {
-              return {
-                ...cat,
-                subcategories: cat.subcategories.filter(
-                  (sub) => sub.id !== currentItem.id
-                ),
-              };
-            }
-            return cat;
-          })
-        );
-      } else {
-        setCategories((cats) =>
-          cats.filter((cat) => cat.id !== currentItem.id)
-        );
+        if (parentCat) {
+          const newSub = {
+            id: Date.now().toString(),
+            name: subNameRef.current.value,
+          };
+
+          const updatedSubs = [...(parentCat.subcategories || []), newSub];
+          const catRef = doc(db, "categories", parentId);
+          await updateDoc(catRef, { subcategories: updatedSubs });
+          alert("Subcategoría guardada en la nube ☁️");
+        }
       }
+
+      fetchCategories();
+      closeModal();
+    } catch (error) {
+      console.error("Error al guardar:", error);
+      alert("Error guardando en la nube");
     }
-    closeModal();
+  };
+
+  // --- LOGICA DE ACTUALIZAR ---
+  const handleUpdate = async (e) => {
+    e.preventDefault();
+
+    try {
+      if (modalType === "editCategory") {
+        const catRef = doc(db, "categories", currentItem.id);
+        await updateDoc(catRef, {
+          name: catNameRef.current.value,
+          image: imagePreview,
+        });
+      } else if (modalType === "editSub") {
+        const parentCat = categories.find((c) => c.id === currentItem.parentId);
+        if (parentCat) {
+          const updatedSubs = parentCat.subcategories.map((sub) =>
+            sub.id === currentItem.id
+              ? { ...sub, name: subNameRef.current.value }
+              : sub
+          );
+
+          const catRef = doc(db, "categories", currentItem.parentId);
+          await updateDoc(catRef, { subcategories: updatedSubs });
+        }
+      }
+
+      fetchCategories();
+      closeModal();
+    } catch (error) {
+      console.error("Error actualizando:", error);
+      alert("Error al actualizar");
+    }
+  };
+
+  // --- LOGICA DE ELIMINAR ---
+  const handleConfirmDelete = async () => {
+    try {
+      if (modalType === "delete") {
+        if (currentItem.parentId) {
+          const parentCat = categories.find(
+            (c) => c.id === currentItem.parentId
+          );
+          if (parentCat) {
+            const updatedSubs = parentCat.subcategories.filter(
+              (sub) => sub.id !== currentItem.id
+            );
+            const catRef = doc(db, "categories", currentItem.parentId);
+            await updateDoc(catRef, { subcategories: updatedSubs });
+          }
+        } else {
+          await deleteDoc(doc(db, "categories", currentItem.id));
+        }
+      }
+      fetchCategories();
+      closeModal();
+    } catch (error) {
+      console.error("Error eliminando:", error);
+      alert("Error al eliminar");
+    }
   };
 
   const labelClass =
@@ -179,7 +204,7 @@ export default function Categories() {
             Categorías de Productos
           </h1>
           <p className="text-sm text-slate-500">
-            Organiza tu inventario para facilitar la navegación
+            Organiza tu inventario (Conectado a la Nube ☁️)
           </p>
         </div>
         <div className="flex gap-3">
@@ -199,72 +224,80 @@ export default function Categories() {
       </div>
 
       <div className="space-y-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-        {categories.map((category, index) => (
-          <div key={category.id}>
-            <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200 group hover:border-blue-300 transition-all">
-              <div className="flex items-center gap-4">
-                <span className="font-bold text-blue-600">{index + 1}.</span>
-                {category.image && (
-                  <img
-                    src={category.image}
-                    alt={category.name}
-                    className="w-10 h-10 rounded-md object-cover border border-slate-200"
-                  />
-                )}
-                <span className="font-semibold text-slate-800 text-lg">
-                  {category.name}
-                </span>
-              </div>
-              <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button
-                  onClick={() => openEdit(category, "editCategory")}
-                  className="p-2 hover:bg-blue-100 text-blue-600 rounded-full transition-colors"
-                >
-                  <Edit2 size={18} />
-                </button>
-                <button
-                  onClick={() => openDelete(category, "category")}
-                  className="p-2 hover:bg-red-100 text-red-600 rounded-full transition-colors"
-                >
-                  <Trash2 size={18} />
-                </button>
-              </div>
-            </div>
-            <div className="ml-8 mt-2 space-y-2 border-l-2 border-slate-100 pl-4">
-              {category.subcategories.map((sub) => (
-                <div
-                  key={sub.id}
-                  className="flex items-center justify-between p-3 bg-white rounded-lg border border-slate-100 hover:border-slate-200 group transition-all"
-                >
-                  <span className="text-slate-600 flex items-center gap-2">
-                    <span className="text-slate-300">-</span> {sub.name}
-                  </span>
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={() => openEdit(sub, "editSub", category.id)}
-                      className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-full transition-colors"
-                    >
-                      <Edit2 size={16} />
-                    </button>
-                    <button
-                      onClick={() =>
-                        openDelete(sub, "subcategory", category.id)
-                      }
-                      className="p-1.5 hover:bg-red-50 text-red-500 rounded-full transition-colors"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {category.subcategories.length === 0 && (
-                <p className="text-xs text-slate-400 italic py-2 pl-2">
-                  Sin subcategorías
-                </p>
-              )}
-            </div>
+        {loading ? (
+          <div className="text-center py-8 text-slate-400">
+            Cargando categorías...
           </div>
-        ))}
+        ) : (
+          categories.map((category, index) => (
+            <div key={category.id}>
+              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200 group hover:border-blue-300 transition-all">
+                <div className="flex items-center gap-4">
+                  <span className="font-bold text-blue-600">{index + 1}.</span>
+                  {category.image && (
+                    <img
+                      src={category.image}
+                      alt={category.name}
+                      className="w-10 h-10 rounded-md object-cover border border-slate-200"
+                    />
+                  )}
+                  <span className="font-semibold text-slate-800 text-lg">
+                    {category.name}
+                  </span>
+                </div>
+                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={() => openEdit(category, "editCategory")}
+                    className="p-2 hover:bg-blue-100 text-blue-600 rounded-full transition-colors"
+                  >
+                    <Edit2 size={18} />
+                  </button>
+                  <button
+                    onClick={() => openDelete(category, "category")}
+                    className="p-2 hover:bg-red-100 text-red-600 rounded-full transition-colors"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              </div>
+              <div className="ml-8 mt-2 space-y-2 border-l-2 border-slate-100 pl-4">
+                {category.subcategories &&
+                  category.subcategories.map((sub) => (
+                    <div
+                      key={sub.id}
+                      className="flex items-center justify-between p-3 bg-white rounded-lg border border-slate-100 hover:border-slate-200 group transition-all"
+                    >
+                      <span className="text-slate-600 flex items-center gap-2">
+                        <span className="text-slate-300">-</span> {sub.name}
+                      </span>
+                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => openEdit(sub, "editSub", category.id)}
+                          className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-full transition-colors"
+                        >
+                          <Edit2 size={16} />
+                        </button>
+                        <button
+                          onClick={() =>
+                            openDelete(sub, "subcategory", category.id)
+                          }
+                          className="p-1.5 hover:bg-red-50 text-red-500 rounded-full transition-colors"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                {(!category.subcategories ||
+                  category.subcategories.length === 0) && (
+                  <p className="text-xs text-slate-400 italic py-2 pl-2">
+                    Sin subcategorías
+                  </p>
+                )}
+              </div>
+            </div>
+          ))
+        )}
       </div>
 
       {isModalOpen && (

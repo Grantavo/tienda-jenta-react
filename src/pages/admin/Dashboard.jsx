@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Link } from "react-router-dom"; // Importamos Link para la navegación
+import React, { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import StatCard from "../../components/admin/StatCard";
 import {
   AreaChart,
@@ -23,7 +23,11 @@ import {
   ShoppingBag,
 } from "lucide-react";
 
-// --- DATOS FIJOS (Gráficos) ---
+// 1. IMPORTAR FIREBASE
+import { db } from "../../firebase/config";
+import { collection, getDocs } from "firebase/firestore";
+
+// --- DATOS FIJOS PARA GRÁFICOS (Visual) ---
 const dataSemana = [
   { name: "Lun", ventas: 4000 },
   { name: "Mar", ventas: 3000 },
@@ -62,10 +66,91 @@ const dataProductosTop = [
 const COLORS = ["#4285F4", "#DB4437", "#F4B400", "#0F9D58"];
 
 export default function Dashboard() {
-  // 1. ESTADO DEL FILTRO
   const [viewMode, setViewMode] = useState("anio");
+  const [loading, setLoading] = useState(true);
 
-  // 2. LÓGICA DE GRÁFICOS
+  // ESTADOS DE DATOS REALES
+  const [realUsers, setRealUsers] = useState([]);
+  const [realRoles, setRealRoles] = useState([]);
+  const [counts, setCounts] = useState({
+    users: 0,
+    products: 0,
+    categories: 0,
+    banners: 0,
+    orders: 0,
+    coupons: 0,
+    totalSales: 0, // Nuevo dato para el gráfico circular
+  });
+
+  // 2. EFECTO: CARGAR DATOS DESDE FIREBASE
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        // Ejecutamos todas las consultas en paralelo para mayor velocidad
+        const [
+          usersSnap,
+          productsSnap,
+          catsSnap,
+          ordersSnap,
+          bannersSnap,
+          couponsSnap, // Asumiendo colección 'coupons' para marketing
+          rolesSnap,
+        ] = await Promise.all([
+          getDocs(collection(db, "users")),
+          getDocs(collection(db, "products")),
+          getDocs(collection(db, "categories")),
+          getDocs(collection(db, "orders")),
+          getDocs(collection(db, "banners")),
+          getDocs(collection(db, "coupons")),
+          getDocs(collection(db, "roles")),
+        ]);
+
+        // A. Calcular Conteos
+        const activeOrders = ordersSnap.docs.filter((d) => {
+          const s = d.data().status;
+          return s !== "Entregado" && s !== "Anulado";
+        }).length;
+
+        // B. Calcular Total Ventas (Suma real de pedidos)
+        let totalSalesCalc = 0;
+        ordersSnap.forEach((doc) => {
+          totalSalesCalc += Number(doc.data().total) || 0;
+        });
+
+        setCounts({
+          users: usersSnap.size,
+          products: productsSnap.size,
+          categories: catsSnap.size,
+          banners: bannersSnap.size,
+          orders: activeOrders,
+          coupons: couponsSnap.size,
+          totalSales: totalSalesCalc,
+        });
+
+        // C. Datos para la Tabla de Usuarios
+        const usersData = usersSnap.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        // Invertimos para ver los últimos registrados primero
+        setRealUsers(usersData.reverse());
+
+        const rolesData = rolesSnap.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setRealRoles(rolesData);
+      } catch (error) {
+        console.error("Error cargando dashboard:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
   const getChartData = () => {
     switch (viewMode) {
       case "semana":
@@ -79,47 +164,28 @@ export default function Dashboard() {
     }
   };
 
-  // 3. CARGA DE DATOS (Lazy Init)
-  const [realUsers] = useState(() => {
-    const saved = localStorage.getItem("shopUsers");
-    return saved ? JSON.parse(saved).slice().reverse() : [];
-  });
+  // Helper de precio
+  const formatPriceCompact = (price) => {
+    return new Intl.NumberFormat("es-CO", {
+      style: "currency",
+      currency: "COP",
+      notation: "compact",
+      maximumFractionDigits: 1,
+    }).format(price);
+  };
 
-  const [realRoles] = useState(() => {
-    const saved = localStorage.getItem("shopRoles");
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [counts] = useState(() => {
-    const users = JSON.parse(localStorage.getItem("shopUsers") || "[]");
-    const products = JSON.parse(localStorage.getItem("shopProducts") || "[]");
-    const categories = JSON.parse(
-      localStorage.getItem("shopCategories") || "[]"
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-slate-900"></div>
+      </div>
     );
-    const coupons = JSON.parse(localStorage.getItem("shopCoupons") || "[]");
-    const banners = JSON.parse(localStorage.getItem("shopBanners") || "[]");
-
-    // Contamos pedidos activos (No entregados ni anulados)
-    const allOrders = JSON.parse(localStorage.getItem("shopOrders") || "[]");
-    const activeOrdersCount = allOrders.filter(
-      (order) => order.status !== "Entregado" && order.status !== "Anulado"
-    ).length;
-
-    return {
-      users: users.length,
-      products: products.length,
-      categories: categories.length,
-      banners: banners.length,
-      orders: activeOrdersCount,
-      coupons: coupons.length,
-    };
-  });
+  }
 
   return (
     <div className="space-y-6">
       {/* TARJETAS CON ENLACES (LINKED CARDS) */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {/* 1. Usuarios -> /admin/usuarios */}
         <Link
           to="/admin/usuarios"
           className="block transform transition hover:scale-105 active:scale-95"
@@ -131,7 +197,6 @@ export default function Dashboard() {
           />
         </Link>
 
-        {/* 2. Productos -> /admin/productos */}
         <Link
           to="/admin/productos"
           className="block transform transition hover:scale-105 active:scale-95"
@@ -143,7 +208,6 @@ export default function Dashboard() {
           />
         </Link>
 
-        {/* 3. Banners -> /admin/banners */}
         <Link
           to="/admin/banners"
           className="block transform transition hover:scale-105 active:scale-95"
@@ -155,7 +219,6 @@ export default function Dashboard() {
           />
         </Link>
 
-        {/* 4. Categorías -> /admin/categorias */}
         <Link
           to="/admin/categorias"
           className="block transform transition hover:scale-105 active:scale-95"
@@ -167,7 +230,6 @@ export default function Dashboard() {
           />
         </Link>
 
-        {/* 5. Promociones -> /admin/marketing */}
         <Link
           to="/admin/marketing"
           className="block transform transition hover:scale-105 active:scale-95"
@@ -179,7 +241,6 @@ export default function Dashboard() {
           />
         </Link>
 
-        {/* 6. Pedidos -> /admin/pedidos */}
         <Link
           to="/admin/pedidos"
           className="block transform transition hover:scale-105 active:scale-95"
@@ -206,36 +267,19 @@ export default function Dashboard() {
             </h3>
 
             <div className="flex bg-slate-100 p-1 rounded-lg text-sm">
-              <button
-                onClick={() => setViewMode("semana")}
-                className={`px-4 py-1 rounded-md transition-all ${
-                  viewMode === "semana"
-                    ? "bg-white shadow-sm text-slate-800 font-bold"
-                    : "text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                Semana
-              </button>
-              <button
-                onClick={() => setViewMode("anio")}
-                className={`px-4 py-1 rounded-md transition-all ${
-                  viewMode === "anio"
-                    ? "bg-white shadow-sm text-slate-800 font-bold"
-                    : "text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                Año
-              </button>
-              <button
-                onClick={() => setViewMode("historico")}
-                className={`px-4 py-1 rounded-md transition-all ${
-                  viewMode === "historico"
-                    ? "bg-white shadow-sm text-slate-800 font-bold"
-                    : "text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                Histórico
-              </button>
+              {["semana", "anio", "historico"].map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setViewMode(mode)}
+                  className={`px-4 py-1 rounded-md transition-all capitalize ${
+                    viewMode === mode
+                      ? "bg-white shadow-sm text-slate-800 font-bold"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  {mode}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -289,7 +333,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Gráfico Derecho */}
+        {/* Gráfico Derecho (Ventas Totales Reales) */}
         <div className="lg:col-span-1 bg-white rounded-2xl shadow-sm border border-slate-100 p-6 flex flex-col relative">
           <h3 className="font-bold text-slate-700 text-lg mb-4">
             Productos Top
@@ -324,8 +368,9 @@ export default function Dashboard() {
               </PieChart>
             </ResponsiveContainer>
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10 pb-8">
+              {/* Aquí mostramos la venta real calculada de Firebase */}
               <span className="text-3xl font-extrabold text-slate-800 tracking-tight">
-                1,200
+                {formatPriceCompact(counts.totalSales)}
               </span>
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
                 Total Ventas
@@ -335,7 +380,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* TABLA DE USUARIOS */}
+      {/* TABLA DE USUARIOS (DATOS REALES) */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 flex flex-col">
         <div className="flex justify-between items-center mb-6">
           <h3 className="font-bold text-slate-700 text-lg">

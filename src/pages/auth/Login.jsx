@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Lock, Mail, ChevronRight, AlertCircle } from "lucide-react";
 
-// IMPORTAR FIREBASE
+// USAMOS SOLO LA BASE DE DATOS (FIRESTORE)
 import { db } from "../../firebase/config";
 import { collection, query, where, getDocs } from "firebase/firestore";
 
@@ -16,16 +16,13 @@ export default function Login() {
     password: "",
   });
 
-  // --- NUEVO: SI YA ESTOY LOGUEADO, NO ME DEJES VER EL LOGIN ---
+  // Si ya hay una sesión guardada en el navegador, entrar directo
   useEffect(() => {
-    const activeSession = localStorage.getItem("shopUser");
-    if (activeSession) {
-      // Si ya hay usuario, redirigir inmediatamente al admin
-      // replace: true evita que el usuario pueda volver atrás con el botón del navegador
+    const session = localStorage.getItem("shopUser");
+    if (session) {
       navigate("/admin", { replace: true });
     }
   }, [navigate]);
-  // ------------------------------------------------------------
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -33,38 +30,39 @@ export default function Login() {
     setLoading(true);
 
     try {
-      // 1. BUSCAR USUARIO
+      // 1. BUSCAR EL USUARIO EN LA BASE DE DATOS (Colección 'users')
       const q = query(
         collection(db, "users"),
         where("email", "==", formData.email)
       );
+
       const querySnapshot = await getDocs(q);
 
       if (querySnapshot.empty) {
-        setError("El usuario no existe.");
+        setError("El usuario no existe en la base de datos.");
         setLoading(false);
         return;
       }
 
-      // 2. VERIFICAR CONTRASEÑA
+      // 2. OBTENER DATOS
       const userDoc = querySnapshot.docs[0];
       const userData = { id: userDoc.id, ...userDoc.data() };
 
+      // 3. COMPARAR CONTRASEÑA (Directamente con lo que guardaste en el Dashboard)
       if (userData.password !== formData.password) {
-        setError("La contraseña es incorrecta.");
+        setError("Contraseña incorrecta.");
         setLoading(false);
         return;
       }
 
-      // 3. GUARDAR SESIÓN
+      // 4. GUARDAR SESIÓN Y ENTRAR
+      // Guardamos al usuario en el navegador para que no se salga al recargar
       localStorage.setItem("shopUser", JSON.stringify(userData));
 
-      // 4. REDIRIGIR
       navigate("/admin", { replace: true });
     } catch (err) {
-      console.error(err);
-      setError("Error de conexión con la base de datos.");
-    } finally {
+      console.error("Error:", err);
+      setError("Error de conexión. Revisa tu internet.");
       setLoading(false);
     }
   };
@@ -72,7 +70,6 @@ export default function Login() {
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-md rounded-3xl shadow-xl overflow-hidden border border-slate-100">
-        {/* HEADER */}
         <div className="bg-slate-900 p-8 text-center">
           <div className="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-4 backdrop-blur-sm">
             <Lock className="text-white" size={32} />
@@ -80,23 +77,20 @@ export default function Login() {
           <h1 className="text-2xl font-black text-white tracking-tight">
             Bienvenido
           </h1>
-          <p className="text-slate-400 text-sm mt-1">
-            Acceso exclusivo para personal autorizado
-          </p>
+          <p className="text-slate-400 text-sm mt-1">Ingreso administrativo</p>
         </div>
 
-        {/* FORMULARIO */}
         <div className="p-8">
           <form onSubmit={handleLogin} className="space-y-6">
             {error && (
-              <div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm flex items-center gap-2 border border-red-100 animate-in slide-in-from-top-2">
+              <div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm flex items-center gap-2 border border-red-100">
                 <AlertCircle size={16} /> {error}
               </div>
             )}
 
             <div className="space-y-2">
               <label className="text-xs font-bold text-slate-500 uppercase ml-1">
-                Correo Corporativo
+                Correo
               </label>
               <div className="relative">
                 <Mail
@@ -106,8 +100,8 @@ export default function Login() {
                 <input
                   type="email"
                   required
-                  className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:bg-white transition-all font-medium text-slate-700"
-                  placeholder="ejemplo@empresa.com"
+                  className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 transition-all font-medium text-slate-700"
+                  placeholder="admin@jenta.com"
                   value={formData.email}
                   onChange={(e) =>
                     setFormData({ ...formData, email: e.target.value })
@@ -128,7 +122,7 @@ export default function Login() {
                 <input
                   type="password"
                   required
-                  className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:bg-white transition-all font-medium text-slate-700"
+                  className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 transition-all font-medium text-slate-700"
                   placeholder="••••••••"
                   value={formData.password}
                   onChange={(e) =>
@@ -141,16 +135,12 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+              className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2"
             >
-              {loading ? "Validando..." : "Ingresar al Sistema"}
+              {loading ? "Verificando..." : "Ingresar"}
               {!loading && <ChevronRight size={20} />}
             </button>
           </form>
-        </div>
-
-        <div className="bg-slate-50 p-4 text-center text-xs text-slate-400 border-t border-slate-100">
-          Plataforma de Gestión v2.0
         </div>
       </div>
     </div>

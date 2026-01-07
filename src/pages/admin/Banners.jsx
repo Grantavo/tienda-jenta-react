@@ -1,49 +1,89 @@
 import React, { useState, useEffect } from "react";
-import { Plus, Trash2, Image as ImageIcon, Layout, Type } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  Image as ImageIcon,
+  Layout,
+  Type,
+  Cloud,
+  Link as LinkIcon,
+  ChevronDown,
+} from "lucide-react";
+
+// IMPORTAR FIREBASE
+import { db } from "../../firebase/config";
+import { doc, getDoc, setDoc, collection, getDocs } from "firebase/firestore";
 
 export default function Banners() {
-  // --- 1. ESTADO DE BANNERS (CARRUSEL) ---
-  // Guardamos esto en 'shopBanners' para que el Dashboard lo pueda contar
-  const [banners, setBanners] = useState(() => {
-    const saved = localStorage.getItem("shopBanners");
-    return saved
-      ? JSON.parse(saved)
-      : [
-          {
-            id: 1,
-            title: "LA MEJOR TECNOLOGÍA",
-            subtitle: "Descubre nuestra nueva colección.",
-            btnText: "Ver Ofertas",
-            image: null,
-            active: true,
-          },
-        ];
+  const [loading, setLoading] = useState(true);
+
+  // --- 1. ESTADOS ---
+  const [banners, setBanners] = useState([]);
+  const [topBar, setTopBar] = useState({
+    text: "🎉 ¡Envío GRATIS en compras superiores a $200.000!",
+    bgColor: "#0f172a",
+    textColor: "#ffffff",
+    isActive: true,
   });
 
-  // --- 2. ESTADO DE TOPBAR (BARRA SUPERIOR) ---
-  // Esto lo dejamos aparte en 'shopDesign' porque no afecta al contador del Dashboard
-  const [topBar, setTopBar] = useState(() => {
-    const saved = localStorage.getItem("shopDesign");
-    const parsed = saved ? JSON.parse(saved) : {};
-    return (
-      parsed.topBar || {
-        text: "🎉 ¡Envío GRATIS en compras superiores a $200.000!",
-        bgColor: "#0f172a",
-        textColor: "#ffffff",
-        isActive: true,
+  // Listas para los selectores
+  const [availableProducts, setAvailableProducts] = useState([]);
+  const [availableCategories, setAvailableCategories] = useState([]);
+
+  // --- 2. CARGAR DATOS ---
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        // A. Cargar Diseño
+        const docRef = doc(db, "banners", "design");
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data.banners) setBanners(data.banners);
+          if (data.topBar) setTopBar(data.topBar);
+        } else {
+          // Default
+          setBanners([
+            {
+              id: 1,
+              title: "LA MEJOR TECNOLOGÍA",
+              subtitle: "Descubre nuestra nueva colección.",
+              btnText: "Ver Ofertas",
+              link: "/productos",
+              linkType: "product", // Default a producto
+              targetId: "",
+              subTargetId: "", // Nuevo campo para subcategoría
+              image: null,
+              active: true,
+            },
+          ]);
+        }
+
+        // B. Cargar Productos y Categorías
+        const [prodsSnap, catsSnap] = await Promise.all([
+          getDocs(collection(db, "products")),
+          getDocs(collection(db, "categories")),
+        ]);
+
+        setAvailableProducts(
+          prodsSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
+        );
+        setAvailableCategories(
+          catsSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
+        );
+      } catch (error) {
+        console.error("Error cargando datos:", error);
+      } finally {
+        setLoading(false);
       }
-    );
-  });
+    };
+    loadData();
+  }, []);
 
-  // --- 3. PERSISTENCIA ---
+  // --- 3. PERSISTENCIA LOCAL ---
   useEffect(() => {
     localStorage.setItem("shopBanners", JSON.stringify(banners));
-    // Disparamos evento para que el Dashboard se actualice al instante
-    window.dispatchEvent(new Event("storage"));
-  }, [banners]);
-
-  useEffect(() => {
-    // Guardamos la configuración visual general (TopBar)
     const currentDesign = JSON.parse(
       localStorage.getItem("shopDesign") || "{}"
     );
@@ -51,13 +91,26 @@ export default function Banners() {
       "shopDesign",
       JSON.stringify({ ...currentDesign, topBar })
     );
-  }, [topBar]);
+    window.dispatchEvent(new Event("storage"));
+  }, [banners, topBar]);
 
   // --- 4. FUNCIONES ---
+
+  const handleSaveToCloud = async () => {
+    try {
+      const designData = { banners, topBar, updatedAt: new Date() };
+      await setDoc(doc(db, "banners", "design"), designData);
+      alert("¡Diseño guardado en la nube! ☁️");
+    } catch (error) {
+      console.error("Error guardando:", error);
+      alert("Error al guardar. Verifica el tamaño de las imágenes.");
+    }
+  };
 
   const handleImageUpload = (id, e) => {
     const file = e.target.files[0];
     if (file) {
+      if (file.size > 1000000) return alert("⚠️ Imagen muy pesada (>1MB).");
       const reader = new FileReader();
       reader.onloadend = () => {
         setBanners((prev) =>
@@ -69,14 +122,17 @@ export default function Banners() {
   };
 
   const addBanner = () => {
-    const newId = Date.now();
     setBanners((prev) => [
       ...prev,
       {
-        id: newId,
+        id: Date.now(),
         title: "NUEVA OFERTA",
-        subtitle: "Descripción corta...",
+        subtitle: "Descripción...",
         btnText: "Ver más",
+        link: "",
+        linkType: "product", // Default
+        targetId: "",
+        subTargetId: "",
         image: null,
         active: true,
       },
@@ -85,7 +141,7 @@ export default function Banners() {
 
   const deleteBanner = (id) => {
     if (banners.length === 1)
-      return alert("Debes tener al menos un banner activo.");
+      return alert("Debes mantener al menos un banner.");
     setBanners((prev) => prev.filter((b) => b.id !== id));
   };
 
@@ -95,34 +151,75 @@ export default function Banners() {
     );
   };
 
-  // --- RENDER ---
+  // --- LÓGICA DE ENLACES MEJORADA ---
+  const updateLinkLogic = (id, type, targetId = "", subTargetId = "") => {
+    let finalLink = "/productos";
+
+    if (type === "product" && targetId) {
+      finalLink = `/producto/${targetId}`;
+    } else if (type === "category" && targetId) {
+      finalLink = `/categoria/${targetId}`;
+      // Si seleccionó subcategoría, la agregamos al link
+      if (subTargetId) {
+        finalLink += `?sub=${encodeURIComponent(subTargetId)}`;
+      }
+    }
+
+    setBanners((prev) =>
+      prev.map((b) =>
+        b.id === id
+          ? {
+              ...b,
+              linkType: type,
+              targetId: targetId,
+              subTargetId: subTargetId,
+              link: finalLink,
+            }
+          : b
+      )
+    );
+  };
+
+  if (loading)
+    return (
+      <div className="p-10 text-center text-slate-400">Cargando diseño...</div>
+    );
+
   return (
     <div className="p-6 max-w-5xl mx-auto pb-20">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-slate-800">
-          Diseño de la Tienda
-        </h1>
-        <p className="text-sm text-slate-500">
-          Personaliza la apariencia de tu página de inicio.
-        </p>
+      {/* HEADER */}
+      <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">
+            Diseño de la Tienda
+          </h1>
+          <p className="text-sm text-slate-500">
+            Gestiona los banners promocionales.
+          </p>
+        </div>
+        <button
+          onClick={handleSaveToCloud}
+          className="flex items-center gap-2 bg-slate-900 text-white px-6 py-3 rounded-xl font-bold hover:bg-slate-800 transition shadow-lg"
+        >
+          <Cloud size={20} /> Guardar en Nube
+        </button>
       </div>
 
-      {/* --- SECCIÓN 1: BARRA SUPERIOR (TOP BAR) --- */}
+      {/* TOPBAR */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 mb-8">
         <h2 className="font-bold text-lg text-slate-700 mb-4 flex items-center gap-2">
           <Type size={20} className="text-blue-600" /> Barra de Anuncios
         </h2>
-
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-3">
             <label className="text-xs font-bold text-slate-500 uppercase">
-              Mensaje del Anuncio
+              Mensaje
             </label>
             <input
               type="text"
               value={topBar.text}
               onChange={(e) => setTopBar({ ...topBar, text: e.target.value })}
-              className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:border-blue-500 outline-none"
+              className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-500"
             />
           </div>
           <div className="grid grid-cols-2 gap-4">
@@ -130,14 +227,14 @@ export default function Banners() {
               <label className="text-xs font-bold text-slate-500 uppercase">
                 Fondo
               </label>
-              <div className="flex items-center gap-2 border border-slate-200 p-2 rounded-xl">
+              <div className="flex items-center gap-2 border p-2 rounded-xl">
                 <input
                   type="color"
                   value={topBar.bgColor}
                   onChange={(e) =>
                     setTopBar({ ...topBar, bgColor: e.target.value })
                   }
-                  className="w-8 h-8 rounded cursor-pointer border-none"
+                  className="w-8 h-8 rounded border-none cursor-pointer"
                 />
                 <span className="text-xs text-slate-400">{topBar.bgColor}</span>
               </div>
@@ -146,14 +243,14 @@ export default function Banners() {
               <label className="text-xs font-bold text-slate-500 uppercase">
                 Texto
               </label>
-              <div className="flex items-center gap-2 border border-slate-200 p-2 rounded-xl">
+              <div className="flex items-center gap-2 border p-2 rounded-xl">
                 <input
                   type="color"
                   value={topBar.textColor}
                   onChange={(e) =>
                     setTopBar({ ...topBar, textColor: e.target.value })
                   }
-                  className="w-8 h-8 rounded cursor-pointer border-none"
+                  className="w-8 h-8 rounded border-none cursor-pointer"
                 />
                 <span className="text-xs text-slate-400">
                   {topBar.textColor}
@@ -162,20 +259,15 @@ export default function Banners() {
             </div>
           </div>
         </div>
-
-        {/* Preview en vivo */}
         <div
           className="mt-4 p-2 rounded-lg text-center text-sm font-bold shadow-sm"
-          style={{
-            backgroundColor: topBar.bgColor,
-            color: topBar.textColor,
-          }}
+          style={{ backgroundColor: topBar.bgColor, color: topBar.textColor }}
         >
           {topBar.text}
         </div>
       </div>
 
-      {/* --- SECCIÓN 2: CARRUSEL PRINCIPAL --- */}
+      {/* CARRUSEL DE BANNERS */}
       <div className="space-y-6">
         <div className="flex justify-between items-end">
           <h2 className="font-bold text-lg text-slate-700 flex items-center gap-2">
@@ -218,7 +310,7 @@ export default function Banners() {
               />
             </div>
 
-            {/* Lado Derecho: Textos */}
+            {/* Lado Derecho: Configuración */}
             <div className="flex-1 space-y-4">
               <div className="flex justify-between">
                 <span className="text-xs font-bold bg-slate-100 px-2 py-1 rounded text-slate-500">
@@ -235,8 +327,8 @@ export default function Banners() {
               <div className="grid grid-cols-1 gap-3">
                 <input
                   type="text"
-                  placeholder="Título Grande (Ej: TECNOLOGÍA)"
-                  className="w-full p-2 border-b border-slate-200 focus:border-blue-500 outline-none font-bold text-lg"
+                  placeholder="Título Grande"
+                  className="w-full p-2 border-b font-bold text-lg outline-none focus:border-blue-500"
                   value={banner.title}
                   onChange={(e) =>
                     updateBannerText(banner.id, "title", e.target.value)
@@ -244,22 +336,139 @@ export default function Banners() {
                 />
                 <input
                   type="text"
-                  placeholder="Subtítulo (Ej: Nueva colección...)"
-                  className="w-full p-2 border-b border-slate-200 focus:border-blue-500 outline-none text-slate-600"
+                  placeholder="Subtítulo"
+                  className="w-full p-2 border-b text-slate-600 outline-none focus:border-blue-500"
                   value={banner.subtitle}
                   onChange={(e) =>
                     updateBannerText(banner.id, "subtitle", e.target.value)
                   }
                 />
-                <input
-                  type="text"
-                  placeholder="Texto Botón (Ej: Ver Ofertas)"
-                  className="w-full p-2 border-b border-slate-200 focus:border-blue-500 outline-none text-blue-600 font-bold text-sm"
-                  value={banner.btnText}
-                  onChange={(e) =>
-                    updateBannerText(banner.id, "btnText", e.target.value)
-                  }
-                />
+
+                <div className="grid grid-cols-2 gap-4">
+                  <input
+                    type="text"
+                    placeholder="Texto Botón"
+                    className="w-full p-2 border-b text-blue-600 font-bold text-sm outline-none focus:border-blue-500"
+                    value={banner.btnText}
+                    onChange={(e) =>
+                      updateBannerText(banner.id, "btnText", e.target.value)
+                    }
+                  />
+
+                  {/* --- CONFIGURACIÓN DE ENLACE --- */}
+                  <div className="flex flex-col gap-2">
+                    {/* 1. Selector de Tipo (Solo Producto o Categoría) */}
+                    <div className="relative">
+                      <select
+                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 outline-none focus:border-blue-500 appearance-none cursor-pointer"
+                        value={banner.linkType || "product"}
+                        onChange={(e) =>
+                          updateLinkLogic(banner.id, e.target.value, "", "")
+                        }
+                      >
+                        <option value="product">Producto Específico</option>
+                        <option value="category">Categoría Específica</option>
+                      </select>
+                      <ChevronDown
+                        size={14}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                      />
+                    </div>
+
+                    {/* 2. Selector de Producto */}
+                    {banner.linkType === "product" && (
+                      <select
+                        className="w-full p-2 bg-white border border-blue-200 rounded-lg text-xs text-slate-600 outline-none focus:border-blue-500"
+                        value={banner.targetId || ""}
+                        onChange={(e) =>
+                          updateLinkLogic(banner.id, "product", e.target.value)
+                        }
+                      >
+                        <option value="">Selecciona un producto...</option>
+                        {availableProducts.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.title}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+
+                    {/* 3. Selector de Categoría (Y Subcategoría) */}
+                    {banner.linkType === "category" && (
+                      <div className="flex flex-col gap-2">
+                        {/* Categoría Principal */}
+                        <select
+                          className="w-full p-2 bg-white border border-blue-200 rounded-lg text-xs text-slate-600 outline-none focus:border-blue-500"
+                          value={banner.targetId || ""}
+                          onChange={(e) =>
+                            updateLinkLogic(
+                              banner.id,
+                              "category",
+                              e.target.value,
+                              ""
+                            )
+                          }
+                        >
+                          <option value="">Selecciona una categoría...</option>
+                          {availableCategories.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </select>
+
+                        {/* Subcategoría (Solo si la categoría elegida tiene) */}
+                        {(() => {
+                          const selectedCat = availableCategories.find(
+                            (c) => String(c.id) === String(banner.targetId)
+                          );
+                          if (
+                            selectedCat &&
+                            selectedCat.subcategories &&
+                            selectedCat.subcategories.length > 0
+                          ) {
+                            return (
+                              <select
+                                className="w-full p-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-slate-600 outline-none focus:border-blue-500"
+                                value={banner.subTargetId || ""}
+                                onChange={(e) =>
+                                  updateLinkLogic(
+                                    banner.id,
+                                    "category",
+                                    banner.targetId,
+                                    e.target.value
+                                  )
+                                }
+                              >
+                                <option value="">
+                                  Todas las subcategorías
+                                </option>
+                                {selectedCat.subcategories.map((sub, idx) => {
+                                  // Manejo por si subcategory es string o objeto
+                                  const subName =
+                                    typeof sub === "string" ? sub : sub.name;
+                                  return (
+                                    <option key={idx} value={subName}>
+                                      {subName}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            );
+                          }
+                        })()}
+                      </div>
+                    )}
+
+                    {/* Link Visual (Solo lectura) */}
+                    <div className="flex items-center gap-1 text-[10px] text-slate-400 px-1">
+                      <LinkIcon size={10} />
+                      <span className="truncate max-w-[150px]">
+                        {banner.link || "Sin enlace"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

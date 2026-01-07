@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useSearchParams } from "react-router-dom"; // 1. IMPORTAMOS useSearchParams
 import { Filter, Layers, FolderOpen } from "lucide-react";
 
-// 1. IMPORTAR FIREBASE
+// IMPORTAR FIREBASE
 import { db } from "../../firebase/config";
 import {
   collection,
@@ -13,11 +13,12 @@ import {
   getDoc,
 } from "firebase/firestore";
 
-// 2. IMPORTAR TARJETA MAESTRA
+// IMPORTAR TARJETA MAESTRA
 import ProductCard from "../../components/ProductCard";
 
 export default function CategoryPage() {
   const { id } = useParams();
+  const [searchParams] = useSearchParams(); // 2. HOOK PARA LEER LA URL
 
   // Estados de datos
   const [products, setProducts] = useState([]);
@@ -34,18 +35,23 @@ export default function CategoryPage() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        // A. OBTENER DATOS DE LA CATEGORÍA (Nombre y Subcategorías)
+        // A. OBTENER DATOS DE LA CATEGORÍA
         const catRef = doc(db, "categories", id);
         const catSnap = await getDoc(catRef);
 
+        let currentCategoryData = {
+          name: "Categoría no encontrada",
+          subcategories: [],
+        };
+
         if (catSnap.exists()) {
-          setCategory(catSnap.data());
+          currentCategoryData = catSnap.data();
+          setCategory(currentCategoryData);
         } else {
-          setCategory({ name: "Categoría no encontrada", subcategories: [] });
+          setCategory(currentCategoryData);
         }
 
-        // B. OBTENER PRODUCTOS DE ESTA CATEGORÍA (Desde Firebase)
-        // Nota: Convertimos id a string por seguridad
+        // B. OBTENER PRODUCTOS
         const q = query(
           collection(db, "products"),
           where("categoryId", "==", id.toString())
@@ -58,6 +64,25 @@ export default function CategoryPage() {
         }));
 
         setProducts(prodsData);
+
+        // --- C. MAGIA DEL BANNER: ACTIVAR FILTRO DESDE URL ---
+        // Leemos si la URL tiene ?sub=Nombre
+        const subNameFromUrl = searchParams.get("sub");
+
+        if (subNameFromUrl && currentCategoryData.subcategories) {
+          // Buscamos el ID que corresponde a ese Nombre
+          const foundSub = currentCategoryData.subcategories.find(
+            (s) => s.name === subNameFromUrl
+          );
+
+          if (foundSub) {
+            setActiveSubcat(foundSub.id); // Si existe, activamos ese filtro
+          } else {
+            setActiveSubcat("all"); // Si no, mostramos todo
+          }
+        } else {
+          setActiveSubcat("all");
+        }
       } catch (error) {
         console.error("Error cargando categoría:", error);
       } finally {
@@ -67,15 +92,14 @@ export default function CategoryPage() {
 
     if (id) {
       fetchData();
-      setActiveSubcat("all"); // Resetear filtro al cambiar de categoría
     }
-  }, [id]);
+  }, [id, searchParams]); // Agregamos searchParams a las dependencias
 
-  // --- C. FILTRADO LOCAL (Ya con los datos descargados) ---
+  // --- D. FILTRADO LOCAL ---
   const filteredProducts =
     activeSubcat === "all"
       ? products
-      : products.filter((p) => p.subcategoryId == activeSubcat); // Usamos == para evitar error de tipo string/number
+      : products.filter((p) => p.subcategoryId == activeSubcat);
 
   return (
     <div className="bg-slate-50 min-h-screen py-10 px-4">
@@ -117,7 +141,7 @@ export default function CategoryPage() {
                   Ver Todo
                 </button>
 
-                {/* Botones Dinámicos desde Firebase */}
+                {/* Botones Dinámicos */}
                 {category.subcategories.map((sub) => (
                   <button
                     key={sub.id}
@@ -164,7 +188,7 @@ export default function CategoryPage() {
             )}
           </div>
         ) : (
-          // Grid de Tarjetas (Usando tu diseño visual correcto)
+          // Grid de Tarjetas
           <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
             {filteredProducts.map((p) => (
               <ProductCard key={p.id} product={p} />
@@ -173,7 +197,6 @@ export default function CategoryPage() {
         )}
       </div>
 
-      {/* Estilo inline para el scrollbar horizontal */}
       <style jsx>{`
         .custom-scrollbar::-webkit-scrollbar { height: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }

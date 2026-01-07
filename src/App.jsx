@@ -5,8 +5,11 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import ShopLayout from "./layouts/ShopLayout";
 import AdminLayout from "./layouts/AdminLayout";
 
-// Páginas de Autenticación
-import Login from "./pages/auth/Login";
+// Componente de Seguridad
+import RequireAuth from "./components/RequireAuth";
+
+// Páginas de Autenticación (RUTA CORREGIDA)
+import Login from "./pages/auth/Login"; // <--- Ahora apunta a src/pages/auth/Login
 
 // Páginas Tienda (Públicas)
 import Home from "./pages/Home";
@@ -25,79 +28,9 @@ import Clients from "./pages/admin/Clients";
 import Users from "./pages/admin/Users";
 import Marketing from "./pages/admin/Marketing";
 import Payments from "./pages/admin/Payments";
-import Migration from "./pages/admin/Migration"; // <--- 1. NUEVA IMPORTACIÓN
-
-// --- GUARDIA DE SEGURIDAD ---
-const ProtectedRoute = ({ children }) => {
-  const session = localStorage.getItem("activeSession");
-  if (!session) {
-    return <Navigate to="/login" replace />;
-  }
-  return children;
-};
+import Migration from "./pages/admin/Migration";
 
 export default function App() {
-  // --- SEMILLA DE DATOS (Solo si está vacío) ---
-  useEffect(() => {
-    // 1. Categorías
-    const existingCats = localStorage.getItem("shopCategories");
-    if (!existingCats || JSON.parse(existingCats).length === 0) {
-      const defaultCats = [
-        { id: 1, name: "Tecnología", image: null, subcategories: [] },
-        { id: 2, name: "Hogar", image: null, subcategories: [] },
-        { id: 3, name: "Herramientas", image: null, subcategories: [] },
-        { id: 4, name: "Deportes", image: null, subcategories: [] },
-      ];
-      localStorage.setItem("shopCategories", JSON.stringify(defaultCats));
-    }
-
-    // 2. Productos
-    const existingProds = localStorage.getItem("shopProducts");
-    if (!existingProds || JSON.parse(existingProds).length === 0) {
-      const defaultProds = [
-        {
-          id: 101,
-          title: "Minipulidora de 1100 watios",
-          price: 250000,
-          oldPrice: 300000,
-          categoryId: 3,
-          stock: 5,
-          bestSeller: "si",
-          description: "Potente minipulidora...",
-          reference: "REF-PULI-01",
-          brand: "Einhell",
-          items: [],
-          images: [
-            "https://http2.mlstatic.com/D_NQ_NP_960907-MCO45473797632_042021-O.webp",
-            null,
-            null,
-            null,
-          ],
-        },
-        {
-          id: 102,
-          title: "Reloj Digital Deportivo",
-          price: 85000,
-          oldPrice: 120000,
-          categoryId: 1,
-          stock: 12,
-          bestSeller: "no",
-          description: "Reloj resistente...",
-          reference: "REF-WATCH-02",
-          brand: "Genérica",
-          items: [],
-          images: [
-            "https://http2.mlstatic.com/D_NQ_NP_606557-MCO73562473872_122023-O.webp",
-            null,
-            null,
-            null,
-          ],
-        },
-      ];
-      localStorage.setItem("shopProducts", JSON.stringify(defaultProds));
-    }
-  }, []);
-
   return (
     <BrowserRouter>
       <Routes>
@@ -112,32 +45,33 @@ export default function App() {
           <Route path="productos" element={<ShopProducts />} />
         </Route>
 
-        {/* ADMIN (Privada) */}
+        {/* ADMIN (Protegida con Firebase Auth) */}
         <Route
           path="/admin"
           element={
-            <ProtectedRoute>
+            <RequireAuth>
               <AdminLayout />
-            </ProtectedRoute>
+            </RequireAuth>
           }
         >
           <Route index element={<Dashboard />} />
+
           {/* Módulos de Gestión */}
           <Route path="pedidos" element={<Orders />} />
           <Route path="productos" element={<Products />} />
           <Route path="categorias" element={<Categories />} />
           <Route path="clientes" element={<Clients />} />
           <Route path="usuarios" element={<Users />} />
+
           {/* Módulos de Tienda y Marketing */}
           <Route path="banners" element={<Banners />} />
           <Route path="marketing" element={<Marketing />} />
           <Route path="pagos" element={<Payments />} />
           <Route path="ajustes" element={<ShopSettings />} />
 
-          {/* 2. RUTA TEMPORAL PARA MIGRACIÓN */}
+          {/* Herramientas */}
           <Route path="migrar" element={<Migration />} />
 
-          {/* Placeholders */}
           <Route
             path="envios"
             element={<h1 className="p-8">Envíos (Próximamente)</h1>}

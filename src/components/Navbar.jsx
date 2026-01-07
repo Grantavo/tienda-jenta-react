@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ShoppingCart,
@@ -9,6 +9,10 @@ import {
   ChevronRight,
 } from "lucide-react";
 
+// IMPORTAR FIREBASE
+import { db } from "../firebase/config";
+import { collection, getDocs } from "firebase/firestore";
+
 export default function Navbar({ cartCount, onOpenCart }) {
   const navigate = useNavigate();
 
@@ -17,30 +21,60 @@ export default function Navbar({ cartCount, onOpenCart }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [showLiveResults, setShowLiveResults] = useState(false);
 
-  // 1. CARGAR DATOS (Identidad y Productos para el Live Search)
-  const [data] = useState(() => {
+  // Estado para guardar los productos reales de la base de datos
+  const [firebaseProducts, setFirebaseProducts] = useState([]);
+
+  // 1. CARGAR DATOS (Configuración y Usuario)
+  const data = useMemo(() => {
     try {
       const settings = JSON.parse(localStorage.getItem("shopSettings") || "{}");
       const logo = localStorage.getItem("shopLogo");
-      const products = JSON.parse(localStorage.getItem("shopProducts") || "[]");
+      const user = JSON.parse(localStorage.getItem("shopUser") || "null");
 
       return {
         nombre: settings.nombre || "JENTA",
         logo: logo,
-        products: products,
+        user: user,
       };
     } catch {
-      return { nombre: "JENTA", logo: null, products: [] };
+      return { nombre: "JENTA", logo: null, user: null };
     }
-  });
+  }, []);
 
-  // 2. FILTRADO EN TIEMPO REAL (Live Search)
+  // 2. EFECTO: TRAER PRODUCTOS DE FIREBASE
+  useEffect(() => {
+    const fetchProducts = async () => {
+      // Si ya tenemos productos cargados, no hacemos nada (evita bucles)
+      if (firebaseProducts.length > 0) return;
+
+      try {
+        const querySnapshot = await getDocs(collection(db, "products"));
+        const docs = querySnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setFirebaseProducts(docs);
+      } catch (error) {
+        console.error("Error cargando productos para búsqueda:", error);
+      }
+    };
+
+    // Solo cargamos si se abre el buscador Y la lista está vacía
+    if (isSearchOpen && firebaseProducts.length === 0) {
+      fetchProducts();
+    }
+
+    // CORRECCIÓN: Agregamos 'firebaseProducts.length' al array de dependencias
+  }, [isSearchOpen, firebaseProducts.length]);
+
+  // 3. FILTRADO EN TIEMPO REAL (Usando firebaseProducts)
   const liveResults = useMemo(() => {
-    if (searchTerm.length < 2) return []; // Solo busca si hay más de 2 letras
-    return data.products
+    if (searchTerm.length < 2) return [];
+    // Usamos firebaseProducts en lugar de localStorage
+    return firebaseProducts
       .filter((p) => p.title.toLowerCase().includes(searchTerm.toLowerCase()))
-      .slice(0, 5); // Limitamos a 5 resultados para no llenar la pantalla
-  }, [searchTerm, data.products]);
+      .slice(0, 5);
+  }, [searchTerm, firebaseProducts]);
 
   // --- MANEJADORES ---
   const handleSearchSubmit = (e) => {
@@ -58,7 +92,6 @@ export default function Navbar({ cartCount, onOpenCart }) {
     setShowLiveResults(val.length > 1);
   };
 
-  // Formateador de precio para la vista previa
   const formatPrice = (price) => {
     return new Intl.NumberFormat("es-CO", {
       style: "currency",
@@ -120,7 +153,6 @@ export default function Navbar({ cartCount, onOpenCart }) {
                   className="bg-slate-50 border border-slate-200 rounded-full py-2 pl-4 pr-10 text-sm outline-none focus:border-sky-500 w-60 md:w-80 transition-all text-slate-700 shadow-sm"
                   value={searchTerm}
                   onChange={handleInputChange}
-                  // Retrasamos el cierre para permitir clic en el resultado
                   onBlur={() =>
                     setTimeout(() => {
                       if (!searchTerm) setIsSearchOpen(false);
@@ -141,26 +173,25 @@ export default function Navbar({ cartCount, onOpenCart }) {
                 </button>
               </form>
 
-              {/* --- RESULTADOS FLOTANTES (DROPDOWN) --- */}
+              {/* --- RESULTADOS FLOTANTES --- */}
               {showLiveResults && (
                 <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                   {liveResults.length > 0 ? (
                     <>
                       <div className="py-2">
                         <p className="px-4 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                          Productos sugeridos
+                          Sugerencias
                         </p>
                         {liveResults.map((product) => (
                           <Link
                             key={product.id}
                             to={`/producto/${product.id}`}
                             onClick={() => {
-                              setIsSearchOpen(false); // Cierra todo al hacer clic
+                              setIsSearchOpen(false);
                               setSearchTerm("");
                             }}
                             className="flex items-center gap-3 px-4 py-2 hover:bg-slate-50 transition-colors group"
                           >
-                            {/* Miniatura Imagen */}
                             <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-200">
                               {product.images && product.images[0] ? (
                                 <img
@@ -172,10 +203,8 @@ export default function Navbar({ cartCount, onOpenCart }) {
                                 <Search size={14} className="text-slate-300" />
                               )}
                             </div>
-
-                            {/* Info */}
                             <div className="flex-1 min-w-0">
-                              <p className="text-sm font-bold text-slate-700 truncate group-hover:text-sky-600 transition-colors">
+                              <p className="text-sm font-bold text-slate-700 truncate group-hover:text-sky-600">
                                 {product.title}
                               </p>
                               <p className="text-xs text-slate-500">
@@ -189,20 +218,19 @@ export default function Navbar({ cartCount, onOpenCart }) {
                           </Link>
                         ))}
                       </div>
-                      {/* Ver todos los resultados */}
                       <div className="bg-slate-50 border-t border-slate-100 p-2">
                         <button
-                          onMouseDown={handleSearchSubmit} // onMouseDown ocurre antes que onBlur
+                          onMouseDown={handleSearchSubmit}
                           className="w-full text-center text-xs font-bold text-sky-600 hover:underline py-1"
                         >
-                          Ver todos los resultados para "{searchTerm}"
+                          Ver todos los resultados
                         </button>
                       </div>
                     </>
                   ) : (
                     <div className="p-4 text-center">
                       <p className="text-sm text-slate-500">
-                        No encontramos coincidencias
+                        No hay coincidencias
                       </p>
                     </div>
                   )}
@@ -218,9 +246,11 @@ export default function Navbar({ cartCount, onOpenCart }) {
             </button>
           )}
 
+          {/* Enlace de Usuario (Dirige al Admin si hay sesión) */}
           <Link
-            to="/admin"
+            to={data.user ? "/" : "/login"}
             className="p-2 hover:bg-slate-50 rounded-full text-slate-600 transition-colors"
+            title={data.user ? "Ir al Panel Admin" : "Iniciar Sesión"}
           >
             <User size={20} />
           </Link>

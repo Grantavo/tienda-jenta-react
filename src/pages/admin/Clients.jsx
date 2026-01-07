@@ -1,59 +1,65 @@
 import React, { useState, useEffect } from "react";
 import {
   Search,
-  User,
   Phone,
   Mail,
   MapPin,
   MessageCircle,
   ShoppingBag,
-  DollarSign,
-  Edit2,
-  Trash2,
   Plus,
   X,
   Star,
+  Trash2,
+  User, // Agregamos User por si no hay foto
 } from "lucide-react";
+
+// 1. IMPORTAR FIREBASE
+import { db } from "../../firebase/config";
+import {
+  collection,
+  getDocs,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+} from "firebase/firestore";
 
 export default function Clients() {
   // --- 1. DATOS ---
-  const [clients, setClients] = useState(() => {
-    const savedClients = JSON.parse(
-      localStorage.getItem("shopClients") || "[]"
-    );
-    const savedOrders = JSON.parse(localStorage.getItem("shopOrders") || "[]");
+  const [clients, setClients] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-    // Generar clientes desde pedidos (si no existen)
-    const clientsFromOrders = savedOrders.reduce(
-      (acc, order) => {
-        const existing = acc.find((c) => c.phone === order.phone);
-        if (!existing) {
-          acc.push({
-            id: Date.now() + Math.random(),
-            name: order.client,
-            phone: order.phone,
-            email: "no-email@registrado.com",
-            address: "Dirección del pedido",
-            notes: "Cliente generado automáticamente por pedido.",
-            isVip: false,
-            joinDate: order.date,
-          });
-        }
-        return acc;
-      },
-      [...savedClients]
-    );
+  // Cargar Clientes y Pedidos desde Firebase
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        // A. Cargar Clientes Reales
+        const clientsSnap = await getDocs(collection(db, "clients"));
+        const clientsData = clientsSnap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        }));
 
-    // Filtrar duplicados
-    const uniqueClients = clientsFromOrders.filter(
-      (v, i, a) => a.findIndex((t) => t.phone === v.phone) === i
-    );
-    return uniqueClients;
-  });
+        // B. Cargar Pedidos (para historial y estadísticas)
+        const ordersSnap = await getDocs(collection(db, "orders"));
+        const ordersData = ordersSnap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        }));
 
-  const [orders] = useState(() =>
-    JSON.parse(localStorage.getItem("shopOrders") || "[]")
-  );
+        setClients(clientsData);
+        setOrders(ordersData);
+      } catch (error) {
+        console.error("Error cargando datos:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
 
   // Estados de Interfaz
   const [searchTerm, setSearchTerm] = useState("");
@@ -70,16 +76,20 @@ export default function Clients() {
   };
   const [formData, setFormData] = useState(initialForm);
 
-  // --- 2. PERSISTENCIA ---
-  useEffect(() => {
-    localStorage.setItem("shopClients", JSON.stringify(clients));
-  }, [clients]);
-
   // --- 3. CÁLCULOS ---
   const getClientStats = (phone) => {
-    const clientOrders = orders.filter((o) => o.phone === phone);
+    // Protección: Si no hay pedidos cargados, devolvemos 0
+    if (!orders || orders.length === 0)
+      return { count: 0, total: 0, history: [] };
+
+    const cleanPhone = String(phone || "").replace(/\D/g, "");
+
+    const clientOrders = orders.filter(
+      (o) => String(o.phone || "").replace(/\D/g, "") === cleanPhone
+    );
+
     const totalSpent = clientOrders.reduce(
-      (acc, order) => acc + order.total,
+      (acc, order) => acc + (Number(order.total) || 0),
       0
     );
     return {
@@ -90,37 +100,78 @@ export default function Clients() {
   };
 
   // --- 4. FUNCIONES ---
-  const handleSave = (e) => {
+  const handleSave = async (e) => {
     e.preventDefault();
-    const newClient = {
-      ...formData,
-      id: Date.now(),
-      isVip: false,
-      joinDate: new Date().toISOString().split("T")[0],
-    };
-    setClients([...clients, newClient]);
-    setIsModalOpen(false);
-    setFormData(initialForm);
-  };
+    try {
+      const newClientData = {
+        ...formData,
+        isVip: false,
+        joinDate: new Date().toISOString().split("T")[0],
+        createdAt: new Date(),
+      };
 
-  const deleteClient = (id) => {
-    if (window.confirm("¿Eliminar cliente?")) {
-      setClients(clients.filter((c) => c.id !== id));
-      setSelectedClient(null);
+      const docRef = await addDoc(collection(db, "clients"), newClientData);
+
+      const savedClient = { id: docRef.id, ...newClientData };
+      setClients([...clients, savedClient]);
+
+      setIsModalOpen(false);
+      setFormData(initialForm);
+    } catch (error) {
+      console.error("Error guardando cliente:", error);
+      alert("Error al guardar en la nube");
     }
   };
 
-  const toggleVip = (id) => {
-    setClients(
-      clients.map((c) => (c.id === id ? { ...c, isVip: !c.isVip } : c))
-    );
+  const deleteClient = async (id) => {
+    if (window.confirm("¿Eliminar cliente?")) {
+      try {
+        await deleteDoc(doc(db, "clients", id));
+        setClients(clients.filter((c) => c.id !== id));
+        setSelectedClient(null);
+      } catch (error) {
+        console.error("Error eliminando cliente:", error);
+      }
+    }
+  };
+
+  const toggleVip = async (id) => {
+    const clientIndex = clients.findIndex((c) => c.id === id);
+    if (clientIndex === -1) return;
+
+    const newVipStatus = !clients[clientIndex].isVip;
+
+    const updatedClients = [...clients];
+    updatedClients[clientIndex].isVip = newVipStatus;
+    setClients(updatedClients);
+
     if (selectedClient && selectedClient.id === id) {
-      setSelectedClient((prev) => ({ ...prev, isVip: !prev.isVip }));
+      setSelectedClient((prev) => ({ ...prev, isVip: newVipStatus }));
+    }
+
+    try {
+      await updateDoc(doc(db, "clients", id), { isVip: newVipStatus });
+    } catch (error) {
+      console.error("Error actualizando VIP:", error);
+    }
+  };
+
+  const handleUpdateNotes = async (id, newNotes) => {
+    const updatedClients = clients.map((c) =>
+      c.id === id ? { ...c, notes: newNotes } : c
+    );
+    setClients(updatedClients);
+    setSelectedClient((prev) => ({ ...prev, notes: newNotes }));
+
+    try {
+      await updateDoc(doc(db, "clients", id), { notes: newNotes });
+    } catch (error) {
+      console.error("Error guardando nota:", error);
     }
   };
 
   const openWhatsApp = (phone, name) => {
-    const msg = `Hola ${name}, te escribimos de Tienda Genta...`;
+    const msg = `Hola ${name || "Cliente"}, te escribimos de Tienda Genta...`;
     window.open(
       `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`,
       "_blank"
@@ -130,12 +181,19 @@ export default function Clients() {
   // --- RENDER ---
   const filteredClients = clients.filter(
     (c) =>
-      c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.phone.includes(searchTerm)
+      (c.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (c.phone && c.phone.includes(searchTerm))
   );
 
+  if (loading) {
+    return (
+      <div className="p-8 text-center text-slate-400">
+        Cargando cartera de clientes...
+      </div>
+    );
+  }
+
   return (
-    // CAMBIO 1: Usamos h-full para que se adapte al contenedor padre sin desbordarse
     <div className="h-full flex flex-col">
       {/* HEADER */}
       <div className="flex justify-between items-center mb-6 shrink-0">
@@ -180,6 +238,10 @@ export default function Clients() {
           <div className="flex-1 overflow-y-auto custom-scrollbar">
             {filteredClients.map((client) => {
               const stats = getClientStats(client.phone);
+              // PROTECCIÓN: Validamos que 'name' exista antes de usar substring
+              const displayName = client.name || "Sin Nombre";
+              const avatarLetter = displayName.substring(0, 2).toUpperCase();
+
               return (
                 <div
                   key={client.id}
@@ -197,14 +259,14 @@ export default function Clients() {
                           client.isVip ? "bg-yellow-500" : "bg-slate-400"
                         }`}
                       >
-                        {client.name.substring(0, 2).toUpperCase()}
+                        {avatarLetter}
                       </div>
                       <div>
                         <h4 className="font-bold text-slate-800 text-sm truncate max-w-[150px]">
-                          {client.name}
+                          {displayName}
                         </h4>
                         <p className="text-xs text-slate-500 flex items-center gap-1">
-                          <Phone size={10} /> {client.phone}
+                          <Phone size={10} /> {client.phone || "Sin tel"}
                         </p>
                       </div>
                     </div>
@@ -243,20 +305,23 @@ export default function Clients() {
                 </button>
               </div>
 
-              {/* INFO PRINCIPAL (Con margen negativo para subir sobre el header) */}
+              {/* INFO PRINCIPAL */}
               <div className="px-8 -mt-16 pb-6 relative z-0">
                 <div className="flex justify-between items-end mb-6">
                   <div className="flex items-end gap-5">
                     {/* Avatar Grande */}
                     <div className="w-28 h-28 bg-white rounded-full p-1.5 shadow-xl">
                       <div className="w-full h-full bg-slate-100 rounded-full flex items-center justify-center text-4xl font-bold text-slate-400">
-                        {selectedClient.name.substring(0, 2).toUpperCase()}
+                        {/* PROTECCIÓN AQUÍ TAMBIÉN */}
+                        {(selectedClient.name || "?")
+                          .substring(0, 2)
+                          .toUpperCase()}
                       </div>
                     </div>
                     {/* Nombre y VIP */}
                     <div className="mb-3">
                       <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
-                        {selectedClient.name}
+                        {selectedClient.name || "Sin Nombre"}
                         <button
                           onClick={() => toggleVip(selectedClient.id)}
                           className={`transition ${
@@ -274,7 +339,7 @@ export default function Clients() {
                         </button>
                       </h2>
                       <p className="text-sm text-slate-500 font-medium">
-                        Cliente desde: {selectedClient.joinDate}
+                        Cliente desde: {selectedClient.joinDate || "N/A"}
                       </p>
                     </div>
                   </div>
@@ -301,7 +366,7 @@ export default function Clients() {
                       <div className="bg-white p-2 rounded-full shadow-sm">
                         <Phone size={14} />
                       </div>
-                      {selectedClient.phone}
+                      {selectedClient.phone || "Sin teléfono"}
                     </div>
                     <div className="flex items-center gap-3 text-sm text-slate-700 font-medium">
                       <div className="bg-white p-2 rounded-full shadow-sm">
@@ -332,16 +397,10 @@ export default function Clients() {
                     className="w-full bg-yellow-50 border border-yellow-200 rounded-2xl p-4 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-yellow-400/50 resize-none shadow-sm"
                     rows="2"
                     placeholder="Escribe aquí preferencias del cliente..."
-                    value={selectedClient.notes}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSelectedClient({ ...selectedClient, notes: val });
-                      setClients(
-                        clients.map((c) =>
-                          c.id === selectedClient.id ? { ...c, notes: val } : c
-                        )
-                      );
-                    }}
+                    value={selectedClient.notes || ""}
+                    onChange={(e) =>
+                      handleUpdateNotes(selectedClient.id, e.target.value)
+                    }
                   ></textarea>
                 </div>
 
@@ -367,20 +426,21 @@ export default function Clients() {
                           >
                             <div className="flex items-center gap-4">
                               <div className="bg-blue-50 p-2.5 rounded-lg text-blue-600 font-bold">
-                                #{order.id.slice(-4)}
+                                #{String(order.id).slice(-4)}
                               </div>
                               <div>
                                 <span className="text-xs font-bold text-slate-400 block mb-0.5">
                                   {order.date}
                                 </span>
                                 <span className="text-sm font-bold text-slate-800">
-                                  {order.items.length} productos
+                                  {order.items ? order.items.length : 0}{" "}
+                                  productos
                                 </span>
                               </div>
                             </div>
                             <div className="text-right">
                               <span className="block font-black text-slate-800 text-lg">
-                                ${order.total.toLocaleString()}
+                                ${Number(order.total).toLocaleString()}
                               </span>
                               <span
                                 className={`text-[10px] px-2.5 py-1 rounded-full font-bold ${
@@ -414,7 +474,7 @@ export default function Clients() {
         </div>
       </div>
 
-      {/* MODAL NUEVO CLIENTE (Sin cambios) */}
+      {/* MODAL NUEVO CLIENTE */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-white p-6 rounded-2xl w-full max-w-md shadow-2xl animate-in fade-in zoom-in duration-200">

@@ -4,65 +4,96 @@ import {
   Search,
   Printer,
   MessageCircle,
-  DollarSign,
-  CheckCircle,
+  AlertTriangle,
   X,
   Trash2,
   ArrowRight,
   ArrowLeft,
   Filter,
-  AlertTriangle,
+  Edit,
+  Minus,
 } from "lucide-react";
 
+// 1. IMPORTAR FIREBASE (Asegúrate de que la ruta sea correcta)
+import { db } from "../../firebase/config";
+import {
+  collection,
+  getDocs,
+  setDoc,
+  doc,
+  getDoc, // Ahora sí lo usamos para la configuración de la tirilla
+  updateDoc,
+  deleteDoc,
+  writeBatch,
+} from "firebase/firestore";
+
 export default function Orders() {
-  // --- 1. ESTADOS Y DATOS ---
-  const [orders, setOrders] = useState(() =>
-    JSON.parse(localStorage.getItem("shopOrders") || "[]")
-  );
-  const [products, setProducts] = useState(() =>
-    JSON.parse(localStorage.getItem("shopProducts") || "[]")
-  );
+  // --- 1. ESTADOS ---
+  const [orders, setOrders] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  // Configuración de la Tirilla
-  const [ticketConfig, setTicketConfig] = useState(() =>
-    JSON.parse(
-      localStorage.getItem("shopTicketConfig") ||
-        '{"name":"MI TIENDA","nit":"123456789","footer":"¡Gracias por su compra!"}'
-    )
-  );
+  // Configuración de la Tirilla (Estado inicial vacío, cargará de la nube)
+  const [ticketConfig, setTicketConfig] = useState({
+    name: "MI TIENDA",
+    nit: "123456789",
+    footer: "¡Gracias por su compra!",
+  });
 
-  // Modales y Filtros
+  // Modales
   const [showPosModal, setShowPosModal] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
-
-  // Estado para filtrar la lista verticalmente (Pestañas)
   const [activeTab, setActiveTab] = useState("Pendiente");
 
-  // Estados del POS
+  // Estados del POS (Carrito)
   const [posCart, setPosCart] = useState([]);
   const [posSearch, setPosSearch] = useState("");
   const [clientName, setClientName] = useState("");
   const [clientPhone, setClientPhone] = useState("");
 
-  // --- 2. PERSISTENCIA ---
-  useEffect(() => {
-    localStorage.setItem("shopOrders", JSON.stringify(orders));
-  }, [orders]);
+  // Estado para Edición
+  const [editingId, setEditingId] = useState(null);
 
+  // --- 2. CARGAR DATOS (Pedidos, Productos y Configuración) ---
   useEffect(() => {
-    localStorage.setItem("shopProducts", JSON.stringify(products));
-  }, [products]);
+    const fetchAllData = async () => {
+      setLoading(true);
+      try {
+        // A. Cargar Pedidos
+        const ordersSnap = await getDocs(collection(db, "orders"));
+        const ordersData = ordersSnap.docs.map((d) => ({
+          ...d.data(),
+          id: parseInt(d.id) || d.id,
+        }));
+        ordersData.sort((a, b) => b.id - a.id); // Ordenar por ID (más nuevo primero)
+        setOrders(ordersData);
 
-  useEffect(() => {
-    localStorage.setItem("shopTicketConfig", JSON.stringify(ticketConfig));
-  }, [ticketConfig]);
+        // B. Cargar Productos
+        const productsSnap = await getDocs(collection(db, "products"));
+        const productsData = productsSnap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        }));
+        setProducts(productsData);
 
-  // --- 3. LÓGICA CONSECUTIVA DE ID (INICIA EN 1001) ---
+        // C. Cargar Configuración de Tirilla (Desde 'settings/ticket')
+        const ticketSnap = await getDoc(doc(db, "settings", "ticket"));
+        if (ticketSnap.exists()) {
+          setTicketConfig(ticketSnap.data());
+        }
+      } catch (error) {
+        console.error("Error general cargando datos:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAllData();
+  }, []);
+
+  // --- 3. LÓGICA DE ID ---
   const generateOrderId = () => {
-    // Si no hay pedidos, arrancamos con el 1001 (Estándar Pro)
     if (orders.length === 0) return 1001;
-
-    // Extraemos solo los números de los pedidos existentes para evitar errores con formatos viejos
     const ids = orders
       .map((o) => {
         const cleanId = String(o.id).replace(/\D/g, "");
@@ -71,87 +102,146 @@ export default function Orders() {
       .filter((n) => !isNaN(n));
 
     if (ids.length === 0) return 1001;
-
-    // Buscamos el mayor y sumamos 1
     return Math.max(...ids) + 1;
   };
 
-  // --- 4. LÓGICA DE STOCK Y PAGOS ---
-  const togglePayment = (orderId) => {
+  // --- 4. GESTIÓN DE STOCK Y PAGOS ---
+  const togglePayment = async (orderId) => {
     const orderIndex = orders.findIndex((o) => o.id === orderId);
     if (orderIndex === -1) return;
 
     const order = orders[orderIndex];
     const newPaymentStatus = !order.isPaid;
-
-    const newProducts = [...products];
     let stockError = false;
 
+    const batch = writeBatch(db);
+    const orderRef = doc(db, "orders", String(orderId));
+    const updatedProducts = [...products];
+
+    // Lógica: Si paga, resta stock. Si despaga, devuelve stock.
     if (newPaymentStatus === true) {
-      order.items.forEach((item) => {
-        const prodIndex = newProducts.findIndex((p) => p.id === item.id);
+      for (const item of order.items) {
+        const prodIndex = updatedProducts.findIndex((p) => p.id === item.id);
         if (prodIndex !== -1) {
-          if (newProducts[prodIndex].stock >= item.qty) {
-            newProducts[prodIndex].stock -= item.qty;
+          if (updatedProducts[prodIndex].stock >= item.qty) {
+            updatedProducts[prodIndex].stock -= item.qty;
+            const prodRef = doc(db, "products", item.id);
+            batch.update(prodRef, { stock: updatedProducts[prodIndex].stock });
           } else {
             stockError = true;
             alert(`¡Error! Sin stock suficiente de ${item.title}.`);
+            break;
           }
         }
-      });
+      }
     } else {
-      order.items.forEach((item) => {
-        const prodIndex = newProducts.findIndex((p) => p.id === item.id);
-        if (prodIndex !== -1) newProducts[prodIndex].stock += item.qty;
-      });
+      for (const item of order.items) {
+        const prodIndex = updatedProducts.findIndex((p) => p.id === item.id);
+        if (prodIndex !== -1) {
+          updatedProducts[prodIndex].stock += item.qty;
+          const prodRef = doc(db, "products", item.id);
+          batch.update(prodRef, { stock: updatedProducts[prodIndex].stock });
+        }
+      }
     }
 
     if (!stockError) {
-      setProducts(newProducts);
-      const newOrders = [...orders];
-      newOrders[orderIndex].isPaid = newPaymentStatus;
-      setOrders(newOrders);
+      try {
+        batch.update(orderRef, { isPaid: newPaymentStatus });
+        await batch.commit();
+
+        // Actualizar UI
+        setProducts(updatedProducts);
+        const newOrders = [...orders];
+        newOrders[orderIndex].isPaid = newPaymentStatus;
+        setOrders(newOrders);
+      } catch (error) {
+        console.error("Error en base de datos:", error);
+        alert("Error de conexión al actualizar el pago.");
+      }
     }
   };
 
-  // --- 5. LÓGICA DE FLUJO (VERTICAL) ---
-  const moveOrder = (orderId, direction) => {
+  // --- 5. GESTIÓN DE ESTADOS (FLUJO) ---
+  const moveOrder = async (orderId, direction) => {
     const states = ["Pendiente", "Preparación", "Terminado", "Entregado"];
-    setOrders((prev) =>
-      prev.map((o) => {
-        if (o.id !== orderId) return o;
-        const currentIndex = states.indexOf(o.status);
-        if (currentIndex === -1) return o;
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) return;
 
-        let nextIndex =
-          direction === "next" ? currentIndex + 1 : currentIndex - 1;
-        if (nextIndex < 0) nextIndex = 0;
-        if (nextIndex >= states.length) nextIndex = states.length - 1;
+    const currentIndex = states.indexOf(order.status);
+    let nextIndex = direction === "next" ? currentIndex + 1 : currentIndex - 1;
+    if (nextIndex < 0) nextIndex = 0;
+    if (nextIndex >= states.length) nextIndex = states.length - 1;
 
-        return { ...o, status: states[nextIndex] };
-      })
-    );
-  };
+    const newStatus = states[nextIndex];
 
-  const cancelOrder = (orderId) => {
-    if (window.confirm("¿Anular pedido?")) {
+    try {
+      await updateDoc(doc(db, "orders", String(orderId)), {
+        status: newStatus,
+      });
       setOrders((prev) =>
-        prev.map((o) => (o.id === orderId ? { ...o, status: "Anulado" } : o))
+        prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o))
       );
+    } catch (error) {
+      console.error("Error al mover estado:", error);
     }
   };
 
-  const deleteOrder = (orderId) => {
-    if (window.confirm("¿Eliminar definitivamente del historial?")) {
-      setOrders((prev) => prev.filter((o) => o.id !== orderId));
+  const cancelOrder = async (orderId) => {
+    if (window.confirm("¿Anular pedido?")) {
+      try {
+        await updateDoc(doc(db, "orders", String(orderId)), {
+          status: "Anulado",
+        });
+        setOrders((prev) =>
+          prev.map((o) => (o.id === orderId ? { ...o, status: "Anulado" } : o))
+        );
+      } catch (error) {
+        console.error("Error al anular:", error);
+      }
     }
   };
 
-  // --- 6. POS (CREAR PEDIDO) ---
+  const deleteOrder = async (orderId) => {
+    if (window.confirm("¿Eliminar definitivamente?")) {
+      try {
+        await deleteDoc(doc(db, "orders", String(orderId)));
+        setOrders((prev) => prev.filter((o) => o.id !== orderId));
+      } catch (error) {
+        console.error("Error al eliminar:", error);
+      }
+    }
+  };
+
+  // --- 6. FUNCIONES DEL POS (CARRITO) ---
+
+  // Abrir POS para crear
+  const openNewOrder = () => {
+    setEditingId(null);
+    setPosCart([]);
+    setClientName("");
+    setClientPhone("");
+    setShowPosModal(true);
+  };
+
+  // Abrir POS para editar
+  const openEditOrder = (order) => {
+    setEditingId(order.id);
+    setPosCart(JSON.parse(JSON.stringify(order.items))); // Clon profundo
+    setClientName(order.client);
+    setClientPhone(order.phone);
+    setShowPosModal(true);
+  };
+
   const addToPosCart = (product) => {
     setPosCart((prev) => {
       const existing = prev.find((p) => p.id === product.id);
       if (existing) {
+        // Validación simple de stock al agregar
+        if (existing.qty + 1 > product.stock) {
+          alert("No hay más stock disponible");
+          return prev;
+        }
         return prev.map((p) =>
           p.id === product.id ? { ...p, qty: p.qty + 1 } : p
         );
@@ -160,41 +250,117 @@ export default function Orders() {
     });
   };
 
+  // Función nueva para controlar cantidad (+/-)
+  const updateQty = (id, delta) => {
+    setPosCart((prev) =>
+      prev.map((item) => {
+        if (item.id === id) {
+          const newQty = item.qty + delta;
+          if (newQty < 1) return item; // Mínimo 1
+
+          // Buscar producto original para validar stock
+          const originalProd = products.find((p) => p.id === id);
+          if (originalProd && newQty > originalProd.stock) {
+            alert("Stock insuficiente");
+            return item;
+          }
+          return { ...item, qty: newQty };
+        }
+        return item;
+      })
+    );
+  };
+
   const removeFromPosCart = (id) => {
     setPosCart((prev) => prev.filter((p) => p.id !== id));
   };
 
-  const createOrder = () => {
+  // --- 7. GUARDAR PEDIDO (CREAR O ACTUALIZAR) ---
+  const handleSaveOrder = async () => {
     if (posCart.length === 0) return alert("El carrito está vacío");
     if (!clientName) return alert("Escribe el nombre del cliente");
 
     const total = posCart.reduce((acc, item) => acc + item.price * item.qty, 0);
 
-    const newOrder = {
-      id: generateOrderId(), // <--- AHORA USA EL NUEVO GENERADOR (1001...)
-      date: new Date().toLocaleDateString("es-CO", {
-        day: "2-digit",
-        month: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-      client: clientName,
-      phone: clientPhone || "573000000000",
-      items: posCart,
-      total: total,
-      status: "Pendiente",
-      isPaid: false,
-    };
+    try {
+      if (editingId) {
+        // --- MODO EDICIÓN ---
+        const orderRef = doc(db, "orders", String(editingId));
 
-    setOrders([newOrder, ...orders]);
-    setPosCart([]);
-    setClientName("");
-    setClientPhone("");
-    setPosSearch("");
-    setShowPosModal(false);
+        await updateDoc(orderRef, {
+          client: clientName,
+          phone: clientPhone || "573000000000",
+          items: posCart,
+          total: total,
+        });
+
+        // Actualizar local
+        setOrders((prev) =>
+          prev.map((o) =>
+            o.id === editingId
+              ? {
+                  ...o,
+                  client: clientName,
+                  phone: clientPhone,
+                  items: posCart,
+                  total: total,
+                }
+              : o
+          )
+        );
+        alert("Pedido actualizado correctamente ✅");
+      } else {
+        // --- MODO CREACIÓN ---
+        const newId = generateOrderId();
+        const newOrder = {
+          id: newId,
+          date: new Date().toLocaleDateString("es-CO", {
+            day: "2-digit",
+            month: "short",
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          client: clientName,
+          phone: clientPhone || "573000000000",
+          items: posCart,
+          total: total,
+          status: "Pendiente",
+          isPaid: false,
+          createdAt: new Date(),
+        };
+
+        // Guardamos con setDoc usando el ID como nombre del documento
+        await setDoc(doc(db, "orders", String(newId)), newOrder);
+
+        setOrders([newOrder, ...orders]);
+        alert("Pedido creado exitosamente 🚀");
+      }
+
+      // Limpiar
+      setShowPosModal(false);
+      setPosCart([]);
+      setClientName("");
+      setClientPhone("");
+      setEditingId(null);
+    } catch (error) {
+      console.error("Error guardando pedido:", error);
+      alert("Error al guardar en la nube. Revisa tu conexión.");
+    }
   };
 
-  // --- 7. IMPRESIÓN Y NOTIFICACIÓN ---
+  // --- 8. GUARDAR CONFIGURACIÓN DE TIRILLA ---
+  const handleSaveConfig = async () => {
+    try {
+      await setDoc(doc(db, "settings", "ticket"), ticketConfig);
+      alert("Configuración de tirilla guardada en la nube ☁️");
+      setShowConfigModal(false);
+    } catch (error) {
+      console.error("Error guardando config:", error);
+      alert("Error al guardar configuración");
+    }
+  };
+
+  // --- 9. UTILIDADES (Impresión y WhatsApp) ---
   const handlePrint = (order) => {
     const printWindow = window.open("", "", "width=300,height=600");
     const itemsHtml = order.items
@@ -232,7 +398,7 @@ export default function Orders() {
             <div class="line"></div>
             <div style="display:flex; justify-content:space-between; font-weight:bold;">
                 <span>TOTAL:</span>
-                <span>$${order.total.toLocaleString()}</span>
+                <span>$${Number(order.total).toLocaleString()}</span>
             </div>
             <div class="line"></div>
             <div class="center"><p>${ticketConfig.footer}</p></div>
@@ -246,23 +412,33 @@ export default function Orders() {
   const handleNotify = (order) => {
     const msg = `Hola ${order.client}, tu pedido *#${
       order.id
-    }* está: *${order.status.toUpperCase()}*. Total: $${order.total.toLocaleString()}.`;
+    }* está: *${order.status.toUpperCase()}*. Total: $${Number(
+      order.total
+    ).toLocaleString()}.`;
     window.open(
       `https://wa.me/${order.phone}?text=${encodeURIComponent(msg)}`,
       "_blank"
     );
   };
 
-  // --- UTILIDAD: RESETEAR BASE DE DATOS (PARA LIMPIAR IDs VIEJOS) ---
-  const handleResetDatabase = () => {
+  const handleResetDatabase = async () => {
     if (
       window.confirm(
-        "⚠️ ¿ESTÁS SEGURO?\n\nEsto borrará TODOS los pedidos actuales para reiniciar el contador a #1001.\n\nEsta acción no se puede deshacer."
+        "⚠️ ¿BORRAR TODOS LOS PEDIDOS DE LA NUBE?\n\nEsta acción no se puede deshacer."
       )
     ) {
-      setOrders([]);
-      localStorage.removeItem("shopOrders");
-      window.location.reload();
+      try {
+        const batch = writeBatch(db);
+        orders.forEach((o) => {
+          const ref = doc(db, "orders", String(o.id));
+          batch.delete(ref);
+        });
+        await batch.commit();
+        setOrders([]);
+        alert("Base de datos de pedidos reiniciada.");
+      } catch (error) {
+        console.error("Error reseteando:", error);
+      }
     }
   };
 
@@ -275,11 +451,15 @@ export default function Orders() {
     "Anulado",
     "Todos",
   ];
-
   const filteredOrders =
     activeTab === "Todos"
       ? orders
       : orders.filter((o) => o.status === activeTab);
+
+  if (loading)
+    return (
+      <div className="p-10 text-center text-slate-400">Cargando pedidos...</div>
+    );
 
   return (
     <div className="p-6 max-w-6xl mx-auto min-h-screen pb-20">
@@ -292,16 +472,14 @@ export default function Orders() {
           <p className="text-sm text-slate-500">Gestión de flujo operativo</p>
         </div>
         <div className="flex gap-2">
-          {/* BOTÓN RESET DE EMERGENCIA */}
           <button
             onClick={handleResetDatabase}
             className="bg-red-50 text-red-600 px-3 py-2 rounded-lg font-bold hover:bg-red-100 transition flex items-center gap-1 border border-red-100"
-            title="Borrar todo y reiniciar contador"
+            title="Borrar todo"
           >
             <AlertTriangle size={16} />{" "}
             <span className="hidden md:inline">Reset</span>
           </button>
-
           <button
             onClick={() => setShowConfigModal(true)}
             className="bg-slate-100 text-slate-600 px-4 py-2 rounded-lg font-bold hover:bg-slate-200"
@@ -309,7 +487,7 @@ export default function Orders() {
             <Printer size={18} />
           </button>
           <button
-            onClick={() => setShowPosModal(true)}
+            onClick={openNewOrder}
             className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 shadow-lg shadow-blue-600/20"
           >
             <Plus size={18} /> Nuevo Pedido
@@ -317,7 +495,7 @@ export default function Orders() {
         </div>
       </div>
 
-      {/* --- VISTA VERTICAL: PESTAÑAS DE FILTRO --- */}
+      {/* TABS */}
       <div className="flex overflow-x-auto gap-2 mb-6 pb-2 custom-scrollbar">
         {tabs.map((tab) => (
           <button
@@ -347,7 +525,7 @@ export default function Orders() {
         ))}
       </div>
 
-      {/* --- LISTA VERTICAL DE TARJETAS --- */}
+      {/* LISTA DE PEDIDOS */}
       <div className="space-y-3">
         {filteredOrders.length === 0 ? (
           <div className="text-center py-12 text-slate-400 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
@@ -362,7 +540,7 @@ export default function Orders() {
               key={order.id}
               className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col md:flex-row gap-4 items-center animate-in slide-in-from-bottom-2"
             >
-              {/* 1. INFO PRINCIPAL (Izquierda) */}
+              {/* 1. INFO PRINCIPAL */}
               <div className="flex-1 w-full md:w-auto">
                 <div className="flex items-center gap-3 mb-1">
                   <span className="bg-slate-100 text-slate-700 font-black px-3 py-1 rounded-lg text-sm">
@@ -379,16 +557,18 @@ export default function Orders() {
                   <span>{order.date}</span>
                   <span>•</span>
                   <span className="text-slate-500 font-medium truncate max-w-[200px]">
-                    {order.items.map((i) => `${i.qty} ${i.title}`).join(", ")}
+                    {order.items
+                      ? order.items.map((i) => `${i.qty} ${i.title}`).join(", ")
+                      : "Sin items"}
                   </span>
                 </p>
               </div>
 
-              {/* 2. ESTADO Y PAGO (Centro) */}
+              {/* 2. ESTADO Y PAGO */}
               <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-start">
                 <div className="text-right mr-4">
                   <span className="block font-black text-lg text-slate-800">
-                    ${order.total.toLocaleString()}
+                    ${Number(order.total).toLocaleString()}
                   </span>
                   <button
                     onClick={() => togglePayment(order.id)}
@@ -403,9 +583,8 @@ export default function Orders() {
                 </div>
               </div>
 
-              {/* 3. ACCIONES (Derecha) */}
+              {/* 3. ACCIONES */}
               <div className="flex items-center gap-2 w-full md:w-auto border-t md:border-t-0 border-slate-100 pt-3 md:pt-0 justify-end">
-                {/* Botones de flujo (Anterior / Siguiente) */}
                 {order.status !== "Anulado" && (
                   <div className="flex bg-slate-100 rounded-lg p-1 mr-2">
                     <button
@@ -428,23 +607,30 @@ export default function Orders() {
                   </div>
                 )}
 
-                {/* Herramientas */}
+                {/* BOTÓN EDITAR */}
+                {order.status !== "Anulado" && order.status !== "Entregado" && (
+                  <button
+                    onClick={() => openEditOrder(order)}
+                    className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                    title="Editar Pedido"
+                  >
+                    <Edit size={18} />
+                  </button>
+                )}
+
                 <button
                   onClick={() => handlePrint(order)}
                   className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"
-                  title="Imprimir Ticket"
                 >
                   <Printer size={18} />
                 </button>
                 <button
                   onClick={() => handleNotify(order)}
                   className="p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-lg"
-                  title="Notificar por WhatsApp"
                 >
                   <MessageCircle size={18} />
                 </button>
 
-                {/* Borrar solo si está anulado, entregado o pendiente */}
                 {(order.status === "Anulado" ||
                   order.status === "Entregado" ||
                   order.status === "Pendiente") && (
@@ -455,7 +641,6 @@ export default function Orders() {
                         : deleteOrder(order.id)
                     }
                     className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                    title="Eliminar/Anular"
                   >
                     {order.status === "Pendiente" ? (
                       <X size={18} />
@@ -470,7 +655,7 @@ export default function Orders() {
         )}
       </div>
 
-      {/* --- MODAL 1: POS --- */}
+      {/* --- MODAL 1: POS (CREAR / EDITAR) --- */}
       {showPosModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white w-full max-w-4xl h-[90vh] rounded-2xl flex overflow-hidden shadow-2xl animate-in zoom-in duration-200">
@@ -510,7 +695,7 @@ export default function Orders() {
                       </h4>
                       <div className="flex justify-between items-center mt-2">
                         <span className="font-bold text-blue-600">
-                          ${product.price.toLocaleString()}
+                          ${Number(product.price).toLocaleString()}
                         </span>
                         <span className="text-[10px] bg-slate-100 px-2 rounded text-slate-500">
                           Stock: {product.stock}
@@ -524,7 +709,9 @@ export default function Orders() {
             {/* Columna Derecha: Resumen */}
             <div className="w-1/3 bg-white p-6 flex flex-col">
               <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-bold">Nuevo Pedido</h2>
+                <h2 className="text-xl font-bold">
+                  {editingId ? `Editar #${editingId}` : "Nuevo Pedido"}
+                </h2>
                 <button onClick={() => setShowPosModal(false)}>
                   <X className="text-slate-400 hover:text-red-500" />
                 </button>
@@ -545,6 +732,7 @@ export default function Orders() {
                   onChange={(e) => setClientPhone(e.target.value)}
                 />
               </div>
+
               <div className="flex-1 overflow-y-auto mb-4 border-t border-b border-slate-100 py-2 custom-scrollbar">
                 {posCart.length === 0 ? (
                   <p className="text-center text-slate-400 text-sm py-10">
@@ -554,31 +742,48 @@ export default function Orders() {
                   posCart.map((item, idx) => (
                     <div
                       key={idx}
-                      className="flex justify-between items-center mb-3 text-sm"
+                      className="flex justify-between items-center mb-3 text-sm border-b border-slate-50 pb-2 last:border-0"
                     >
                       <div>
-                        <p className="font-bold text-slate-700">
-                          {item.title.substring(0, 15)}...
+                        <p className="font-bold text-slate-700 w-32 truncate">
+                          {item.title}
                         </p>
-                        <p className="text-xs text-slate-400">
-                          {item.qty} x ${item.price.toLocaleString()}
-                        </p>
+                        {/* CONTROLES DE CANTIDAD */}
+                        <div className="flex items-center gap-2 mt-1">
+                          <button
+                            onClick={() => updateQty(item.id, -1)}
+                            className="w-5 h-5 bg-slate-100 rounded flex items-center justify-center hover:bg-slate-200"
+                          >
+                            <Minus size={12} />
+                          </button>
+                          <span className="text-xs font-bold w-4 text-center">
+                            {item.qty}
+                          </span>
+                          <button
+                            onClick={() => updateQty(item.id, 1)}
+                            className="w-5 h-5 bg-slate-100 rounded flex items-center justify-center hover:bg-slate-200"
+                          >
+                            <Plus size={12} />
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
+
+                      <div className="flex flex-col items-end gap-1">
                         <span className="font-bold text-slate-800">
                           ${(item.price * item.qty).toLocaleString()}
                         </span>
                         <button
                           onClick={() => removeFromPosCart(item.id)}
-                          className="text-red-400 hover:text-red-600"
+                          className="text-red-400 hover:text-red-600 text-xs flex items-center gap-1"
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={12} /> Borrar
                         </button>
                       </div>
                     </div>
                   ))
                 )}
               </div>
+
               <div className="mt-auto">
                 <div className="flex justify-between items-center mb-4 text-xl font-black text-slate-800">
                   <span>Total:</span>
@@ -590,10 +795,10 @@ export default function Orders() {
                   </span>
                 </div>
                 <button
-                  onClick={createOrder}
+                  onClick={handleSaveOrder}
                   className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition"
                 >
-                  Crear Pedido
+                  {editingId ? "Guardar Cambios" : "Crear Pedido"}
                 </button>
               </div>
             </div>
@@ -601,7 +806,7 @@ export default function Orders() {
         </div>
       )}
 
-      {/* --- MODAL 2: CONFIGURACIÓN --- */}
+      {/* --- MODAL 2: CONFIGURACIÓN TIRILLA --- */}
       {showConfigModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white p-6 rounded-2xl w-full max-w-md shadow-2xl animate-in zoom-in duration-200">
@@ -637,7 +842,7 @@ export default function Orders() {
                 placeholder="Pie de página"
               ></textarea>
               <button
-                onClick={() => setShowConfigModal(false)}
+                onClick={handleSaveConfig}
                 className="w-full bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 mt-4"
               >
                 Guardar

@@ -4,9 +4,17 @@ import { ChevronLeft, ChevronRight, ShoppingBag } from "lucide-react";
 
 // 1. IMPORTAMOS LAS HERRAMIENTAS DE FIREBASE
 import { db } from "../firebase/config";
-import { collection, getDocs, query, where, limit } from "firebase/firestore";
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+  limit,
+  doc,
+  getDoc,
+} from "firebase/firestore"; // <--- Agregamos doc y getDoc
 
-// 2. IMPORTAMOS EL COMPONENTE MAESTRO (NUEVO)
+// 2. IMPORTAMOS EL COMPONENTE MAESTRO
 import ProductCard from "../components/ProductCard";
 
 export default function Home() {
@@ -15,19 +23,45 @@ export default function Home() {
   const [featuredProducts, setFeaturedProducts] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // --- ESTADOS DE DISEÑO (Ahora desde Firebase) ---
+  const [banners, setBanners] = useState([]);
+  const [topBar, setTopBar] = useState(null);
+
   // --- 2. EFECTO: CARGAR DATOS DESDE FIREBASE ---
   useEffect(() => {
     const fetchFirebaseData = async () => {
       try {
         setLoading(true);
 
-        // A. Cargar Categorías
+        // A. Cargar Diseño (Banners y TopBar) desde la colección "banners/design"
+        // ESTE ES EL CAMBIO CLAVE:
+        const designDoc = await getDoc(doc(db, "banners", "design"));
+        if (designDoc.exists()) {
+          const data = designDoc.data();
+          setBanners(data.banners || []);
+          setTopBar(data.topBar || null);
+        } else {
+          // Fallback por si no hay nada en la nube aún
+          setBanners([
+            {
+              id: 999,
+              title: "BIENVENIDO",
+              subtitle: "Explora nuestro catálogo completo",
+              btnText: "Ver Productos",
+              link: "/productos",
+              image: null,
+              active: true,
+            },
+          ]);
+        }
+
+        // B. Cargar Categorías
         const catRef = collection(db, "categories");
         const catSnap = await getDocs(catRef);
         const catsData = catSnap.docs.map((doc) => doc.data());
         setCategories(catsData);
 
-        // B. Cargar Productos Destacados (Tendencias)
+        // C. Cargar Productos Destacados (Tendencias)
         const prodRef = collection(db, "products");
         const q = query(prodRef, where("bestSeller", "==", "si"), limit(4));
         const prodSnap = await getDocs(q);
@@ -46,61 +80,30 @@ export default function Home() {
     fetchFirebaseData();
   }, []);
 
-  // --- DATOS VISUALES (LocalStorage) ---
-  const [topBar] = useState(() => {
-    try {
-      const saved = localStorage.getItem("shopDesign");
-      return saved
-        ? JSON.parse(saved).topBar
-        : {
-            text: "Bienvenido a nuestra tienda",
-            bgColor: "#1e293b",
-            textColor: "#fff",
-          };
-    } catch {
-      return {};
-    }
-  });
-
-  const [banners] = useState(() => {
-    try {
-      const savedBanners = JSON.parse(
-        localStorage.getItem("shopBanners") || "[]"
-      );
-      const activeBanners = savedBanners.filter((b) => b.active);
-      if (activeBanners.length > 0) return activeBanners;
-      return [
-        {
-          id: 999,
-          title: "BIENVENIDO",
-          subtitle: "Explora nuestro catálogo completo",
-          btnText: "Ver Productos",
-          link: "/productos",
-          image: null,
-        },
-      ];
-    } catch {
-      return [];
-    }
-  });
-
   // Lógica del Carrusel
+  // Filtramos solo los banners activos
+  const activeBannersList = banners.filter((b) => b.active !== false);
   const [currentSlide, setCurrentSlide] = useState(0);
+
   const prevSlide = () =>
-    setCurrentSlide((curr) => (curr === 0 ? banners.length - 1 : curr - 1));
+    setCurrentSlide((curr) =>
+      curr === 0 ? activeBannersList.length - 1 : curr - 1
+    );
   const nextSlide = () =>
-    setCurrentSlide((curr) => (curr + 1) % banners.length);
+    setCurrentSlide((curr) => (curr + 1) % activeBannersList.length);
 
   useEffect(() => {
-    if (!banners || banners.length <= 1) return;
+    if (activeBannersList.length <= 1) return;
     const interval = setInterval(
-      () => setCurrentSlide((prev) => (prev + 1) % banners.length),
+      () => setCurrentSlide((prev) => (prev + 1) % activeBannersList.length),
       5000
     );
     return () => clearInterval(interval);
-  }, [banners]);
+  }, [activeBannersList.length]);
 
-  const activeBanner = banners[currentSlide] || banners[0];
+  // Obtenemos el banner actual de la lista filtrada
+  const activeBanner =
+    activeBannersList.length > 0 ? activeBannersList[currentSlide] : banners[0];
 
   // --- RENDERIZADO ---
   if (loading) {
@@ -110,6 +113,9 @@ export default function Home() {
       </div>
     );
   }
+
+  // Protección por si aún no carga activeBanner (aunque loading debería cubrirlo)
+  if (!activeBanner) return null;
 
   return (
     <div className="bg-slate-50 min-h-screen pb-20 font-sans">
@@ -149,6 +155,7 @@ export default function Home() {
           <p className="text-slate-200 text-lg md:text-xl mb-8 max-w-2xl mx-auto drop-shadow-md">
             {activeBanner.subtitle}
           </p>
+          {/* AQUÍ SE USA EL LINK QUE VIENE DE LA NUBE */}
           <Link to={activeBanner.link || "/productos"}>
             <button className="bg-red-600 text-white px-8 py-4 rounded-full font-bold hover:bg-red-700 transition shadow-lg shadow-red-600/30 transform hover:scale-105 active:scale-95">
               {activeBanner.btnText || "Ver Productos"}
@@ -156,7 +163,7 @@ export default function Home() {
           </Link>
         </div>
 
-        {banners.length > 1 && (
+        {activeBannersList.length > 1 && (
           <>
             <button
               onClick={prevSlide}
@@ -171,7 +178,7 @@ export default function Home() {
               <ChevronRight size={28} />
             </button>
             <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-2 z-20">
-              {banners.map((_, idx) => (
+              {activeBannersList.map((_, idx) => (
                 <button
                   key={idx}
                   onClick={() => setCurrentSlide(idx)}
@@ -251,7 +258,6 @@ export default function Home() {
         </div>
 
         {featuredProducts.length > 0 ? (
-          // AQUÍ IMPLEMENTAMOS TU NUEVO DISEÑO DE TARJETAS
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
             {featuredProducts.map((product) => (
               <ProductCard key={product.id} product={product} />

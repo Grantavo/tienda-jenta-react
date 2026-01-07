@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Camera,
   Save,
@@ -10,52 +10,69 @@ import {
   ExternalLink,
 } from "lucide-react";
 
+// 1. IMPORTAR FIREBASE
+import { db } from "../../firebase/config";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+
 export default function ShopSettings() {
+  const [loading, setLoading] = useState(true);
+
   // 1. ESTADO DEL FORMULARIO
-  const [formData, setFormData] = useState(() => {
-    const defaultData = {
-      nombre: "Tienda Jenta",
-      telefono: "3026043683",
-      direccion: "Pasto",
-      email: "grupojenta@gmail.com",
-      eslogan: "Todo a un solo click",
-      instagram: "",
-      facebook: "",
-      whatsapp: "",
-      tiktok: "",
-      qrLink: "",
-    };
-
-    try {
-      const savedData = localStorage.getItem("shopSettings");
-      if (savedData) {
-        return { ...defaultData, ...JSON.parse(savedData) };
-      }
-    } catch {
-      console.log("Error cargando datos, usando valores por defecto.");
-    }
-
-    return defaultData;
+  const [formData, setFormData] = useState({
+    nombre: "Tienda Jenta",
+    telefono: "3026043683",
+    direccion: "Pasto",
+    email: "grupojenta@gmail.com",
+    eslogan: "Todo a un solo click",
+    instagram: "",
+    facebook: "",
+    whatsapp: "",
+    tiktok: "",
+    qrLink: "",
   });
 
   // 2. ESTADO DEL LOGO
-  const [logoPreview, setLogoPreview] = useState(() => {
-    const defaultLogo =
-      "https://ui-avatars.com/api/?name=Tienda+Jenta&background=0D8ABC&color=fff&size=200";
-    try {
-      // Intentamos leer primero del settings general (nueva lógica)
-      const settings = JSON.parse(localStorage.getItem("shopSettings") || "{}");
-      if (settings.logo) return settings.logo;
-
-      // Si no, buscamos en la variable antigua
-      const savedLogo = localStorage.getItem("shopLogo");
-      return savedLogo || defaultLogo;
-    } catch {
-      return defaultLogo;
-    }
-  });
+  const [logoPreview, setLogoPreview] = useState(
+    "https://ui-avatars.com/api/?name=Tienda+Jenta&background=0D8ABC&color=fff&size=200"
+  );
 
   const fileInputRef = useRef(null);
+
+  // --- 3. EFECTO: CARGAR DESDE LA NUBE ---
+  useEffect(() => {
+    const fetchSettings = async () => {
+      setLoading(true);
+      try {
+        const docRef = doc(db, "settings", "shop");
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setFormData((prev) => ({ ...prev, ...data }));
+          if (data.logo) {
+            setLogoPreview(data.logo);
+            localStorage.setItem("shopLogo", data.logo);
+            localStorage.setItem("shopSettings", JSON.stringify(data));
+            window.dispatchEvent(new Event("storage"));
+          }
+        } else {
+          // Si no existe en la nube, intentamos leer de localStorage
+          const savedData = localStorage.getItem("shopSettings");
+          if (savedData) {
+            setFormData((prev) => ({ ...prev, ...JSON.parse(savedData) }));
+          }
+          const savedLogo = localStorage.getItem("shopLogo");
+          if (savedLogo) setLogoPreview(savedLogo);
+        }
+      } catch (error) {
+        console.error("Error cargando configuración:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchSettings();
+  }, []);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -65,10 +82,9 @@ export default function ShopSettings() {
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      // Validación de tamaño (Máx 2MB para no bloquear el navegador)
-      if (file.size > 2000000)
+      if (file.size > 1000000)
         return alert(
-          "⚠️ La imagen es muy pesada (Máx 2MB). Intenta con una más ligera."
+          "⚠️ La imagen es muy pesada (Máx 1MB). Intenta con una más ligera."
         );
 
       const reader = new FileReader();
@@ -120,8 +136,8 @@ export default function ShopSettings() {
     }
   };
 
-  // --- GUARDAR CAMBIOS (AQUÍ ESTÁ LA MEJORA) ---
-  const handleSave = () => {
+  // --- GUARDAR CAMBIOS ---
+  const handleSave = async () => {
     try {
       const rawPhone = formData.whatsapp || formData.telefono;
       const finalPhone = formatPhoneForWhatsApp(rawPhone);
@@ -129,34 +145,55 @@ export default function ShopSettings() {
       const settingsToSave = {
         ...formData,
         phone: finalPhone,
-        logo: logoPreview, // <--- 1. Guardamos el logo AQUÍ para que el Sidebar lo lea
+        logo: logoPreview,
+        updatedAt: new Date(),
       };
 
-      // Guardamos en 'shopSettings' que es lo que escucha el Sidebar
-      localStorage.setItem("shopSettings", JSON.stringify(settingsToSave));
+      // 1. Guardar en FIREBASE
+      await setDoc(doc(db, "settings", "shop"), settingsToSave);
 
-      // Mantener shopLogo por compatibilidad si lo usas en otros lados
+      // 2. Guardar en LOCALSTORAGE (Para reactividad inmediata)
+      localStorage.setItem("shopSettings", JSON.stringify(settingsToSave));
       localStorage.setItem("shopLogo", logoPreview);
 
       document.title = formData.nombre;
-
-      // --- 2. DISPARAMOS EL EVENTO PARA ACTUALIZAR SIDEBAR AL INSTANTE ---
       window.dispatchEvent(new Event("storage"));
 
-      alert(`¡Configuración guardada correctamente!`);
+      alert(`¡Configuración guardada y sincronizada en la nube! ☁️`);
     } catch (error) {
-      console.error(error);
-      alert("Error al guardar.");
+      console.error("Error al guardar:", error);
+      if (
+        error.code === "resource-exhausted" ||
+        error.message.includes("exceeds the maximum allowed size")
+      ) {
+        alert(
+          "❌ Error: La imagen del logo es demasiado pesada para la base de datos. Por favor usa una imagen más pequeña (menos de 1MB)."
+        );
+      } else {
+        alert("Error al guardar la configuración.");
+      }
     }
   };
 
-  const handleReset = () => {
-    if (window.confirm("¿Deseas restablecer los valores de fábrica?")) {
+  const handleReset = async () => {
+    if (
+      window.confirm(
+        "¿Restablecer valores? Esto no borrará los datos de la nube, solo limpiará tu vista actual."
+      )
+    ) {
       localStorage.removeItem("shopSettings");
       localStorage.removeItem("shopLogo");
-      window.location.reload(); // Recargar para limpiar todo
+      window.location.reload();
     }
   };
+
+  if (loading) {
+    return (
+      <div className="p-10 text-center text-slate-400">
+        Cargando configuración...
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-5xl mx-auto">

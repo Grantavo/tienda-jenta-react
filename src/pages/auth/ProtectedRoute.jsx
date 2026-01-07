@@ -2,15 +2,29 @@ import React from "react";
 import { Navigate, Outlet } from "react-router-dom";
 
 export default function ProtectedRoute() {
-  // 1. Buscamos al usuario en la memoria
-  // NOTA: Usamos "shopUser" que es la clave que definimos en el Login
-  const user = JSON.parse(localStorage.getItem("shopUser") || "null");
+  // 1. Recuperar sesión de sessionStorage (Sesión temporal)
+  const userStr = sessionStorage.getItem("shopUser");
 
-  // 2. Si NO hay usuario, patada al Login
-  if (!user) {
+  // 2. Si no hay nada guardado, expulsar al login
+  if (!userStr) {
     return <Navigate to="/login" replace />;
   }
 
-  // 3. Si SÍ hay usuario, renderiza las rutas hijas (Admin)
-  return <Outlet />;
+  try {
+    const user = JSON.parse(userStr);
+
+    // 3. Validación de integridad: ¿El objeto tiene lo mínimo necesario?
+    if (!user.id || !user.email) {
+      throw new Error("Sesión corrupta");
+    }
+
+    // 4. Todo OK: Renderizar el contenido protegido (AdminLayout y sus hijos)
+    return <Outlet />;
+  } catch (error) {
+    console.error("Sesión inválida detectada:", error);
+
+    // Si la data está corrupta, limpiamos y expulsamos
+    sessionStorage.removeItem("shopUser");
+    return <Navigate to="/login" replace />;
+  }
 }

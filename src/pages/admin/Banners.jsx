@@ -10,6 +10,9 @@ import {
   ChevronDown,
 } from "lucide-react";
 
+// 1. IMPORTAR SONNER
+import { toast } from "sonner";
+
 // IMPORTAR FIREBASE
 import { db } from "../../firebase/config";
 import { doc, getDoc, setDoc, collection, getDocs } from "firebase/firestore";
@@ -74,6 +77,7 @@ export default function Banners() {
         );
       } catch (error) {
         console.error("Error cargando datos:", error);
+        toast.error("No se pudo cargar el diseño");
       } finally {
         setLoading(false);
       }
@@ -100,17 +104,24 @@ export default function Banners() {
     try {
       const designData = { banners, topBar, updatedAt: new Date() };
       await setDoc(doc(db, "banners", "design"), designData);
-      alert("¡Diseño guardado en la nube! ☁️");
+      toast.success("¡Diseño guardado en la nube! ☁️");
     } catch (error) {
       console.error("Error guardando:", error);
-      alert("Error al guardar. Verifica el tamaño de las imágenes.");
+      toast.error("Error al guardar", {
+        description: "Verifica el tamaño de las imágenes.",
+      });
     }
   };
 
   const handleImageUpload = (id, e) => {
     const file = e.target.files[0];
     if (file) {
-      if (file.size > 1000000) return alert("⚠️ Imagen muy pesada (>1MB).");
+      if (file.size > 1000000) {
+        toast.warning("Imagen muy pesada", {
+          description: "El límite recomendado es 1MB.",
+        });
+        return;
+      }
       const reader = new FileReader();
       reader.onloadend = () => {
         setBanners((prev) =>
@@ -137,12 +148,20 @@ export default function Banners() {
         active: true,
       },
     ]);
+    toast.success("Nuevo slide agregado");
   };
 
   const deleteBanner = (id) => {
-    if (banners.length === 1)
-      return alert("Debes mantener al menos un banner.");
-    setBanners((prev) => prev.filter((b) => b.id !== id));
+    if (banners.length === 1) {
+      toast.warning("Acción no permitida", {
+        description: "Debes mantener al menos un banner visible.",
+      });
+      return;
+    }
+    // Opcional: Agregar confirmación si quieres seguir el patrón seguro
+    if (window.confirm("¿Eliminar este banner?")) {
+      setBanners((prev) => prev.filter((b) => b.id !== id));
+    }
   };
 
   const updateBannerText = (id, field, value) => {

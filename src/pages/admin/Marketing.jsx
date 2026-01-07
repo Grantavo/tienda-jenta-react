@@ -10,7 +10,10 @@ import {
   CheckCircle,
 } from "lucide-react";
 
-// 1. IMPORTAR FIREBASE
+// 1. IMPORTAR SONNER
+import { toast } from "sonner";
+
+// 2. IMPORTAR FIREBASE
 import { db } from "../../firebase/config";
 import {
   collection,
@@ -53,6 +56,7 @@ export default function Marketing() {
       setCoupons(docs);
     } catch (error) {
       console.error("Error cargando cupones:", error);
+      toast.error("Error cargando los cupones");
     } finally {
       setLoading(false);
     }
@@ -79,10 +83,10 @@ export default function Marketing() {
       await addDoc(collection(db, "coupons"), couponData);
       setNewCoupon({ code: "", discount: "" });
       fetchCoupons(); // Recargar lista
-      alert("Cupón creado en la nube ☁️");
+      toast.success("Cupón creado en la nube ☁️");
     } catch (error) {
       console.error("Error creando cupón:", error);
-      alert("Error al guardar");
+      toast.error("Error al guardar cupón");
     }
   };
 
@@ -91,8 +95,10 @@ export default function Marketing() {
       try {
         await deleteDoc(doc(db, "coupons", id));
         setCoupons(coupons.filter((c) => c.id !== id));
+        toast.info("Cupón eliminado");
       } catch (error) {
         console.error("Error eliminando:", error);
+        toast.error("Error al eliminar");
       }
     }
   };
@@ -109,15 +115,19 @@ export default function Marketing() {
       setCoupons(
         coupons.map((c) => (c.id === id ? { ...c, active: !c.active } : c))
       );
+      toast.success(
+        !coupon.active ? "Cupón activado ✅" : "Cupón desactivado ⏸️"
+      );
     } catch (error) {
       console.error("Error actualizando:", error);
+      toast.error("Error al actualizar estado");
     }
   };
 
   // --- 4. UTILIDADES ---
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
-    alert("¡Enlace copiado al portapapeles!");
+    toast.success("¡Enlace copiado al portapapeles!");
   };
 
   // --- RENDER ---
@@ -399,6 +409,20 @@ export default function Marketing() {
           </div>
         </div>
       )}
+
+      {/* ESTILOS PARA OCULTAR FLECHAS EN INPUT NUMÉRICO */}
+      <style>{`
+        /* Chrome, Safari, Edge, Opera */
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { 
+          -webkit-appearance: none; 
+          margin: 0; 
+        }
+        /* Firefox */
+        input[type=number] {
+          -moz-appearance: textfield;
+        }
+      `}</style>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react"; // <--- 1. IMPORTAMOS useCallback
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Plus,
   Edit2,
@@ -8,6 +8,9 @@ import {
   AlertTriangle,
   ChevronDown,
 } from "lucide-react";
+
+// 1. IMPORTAR SONNER
+import { toast } from "sonner";
 
 import { db } from "../../firebase/config";
 import {
@@ -21,57 +24,64 @@ import {
 
 export default function Categories() {
   const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true); // <--- Inicia en true para evitar parpadeos
+  const [loading, setLoading] = useState(true);
 
   // Referencia a la colección
   const catCollection = collection(db, "categories");
 
-  // --- 2. SOLUCIÓN AL ERROR: USAR useCallback ---
-  // Envolvemos la función en useCallback para que sea estable y no cause re-renders
+  // Función estable para cargar datos
   const fetchCategories = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getDocs(collection(db, "categories")); // Usamos collection directo aquí por seguridad
+      const data = await getDocs(collection(db, "categories"));
       const cats = data.docs.map((doc) => ({ ...doc.data(), id: doc.id }));
       setCategories(cats);
       localStorage.setItem("shopCategories", JSON.stringify(cats));
     } catch (error) {
       console.error("Error cargando categorías:", error);
+      toast.error("Error cargando categorías");
     } finally {
       setLoading(false);
     }
-  }, []); // Array vacío: la función no depende de variables externas cambiantes
+  }, []);
 
   useEffect(() => {
     fetchCategories();
-  }, [fetchCategories]); // Ahora es seguro ponerla como dependencia
+  }, [fetchCategories]);
 
-  // --- (El resto de la lógica sigue igual) ---
+  // --- ESTADOS DEL MODAL ---
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalType, setModalType] = useState("");
+  const [modalType, setModalType] = useState(""); // ej: 'addCategory', 'addSub', 'delete'
   const [currentItem, setCurrentItem] = useState(null);
 
+  // Referencias para los inputs
   const catNameRef = useRef("");
   const subNameRef = useRef("");
   const parentSelectRef = useRef("");
   const fileInputRef = useRef(null);
   const [imagePreview, setImagePreview] = useState(null);
 
+  // --- FUNCIONES PARA ABRIR MODAL ---
   const openAddCategory = () => {
     setModalType("addCategory");
     setImagePreview(null);
+    setCurrentItem(null);
     setIsModalOpen(true);
   };
+
   const openAddSubcategory = () => {
     setModalType("addSub");
+    setCurrentItem(null);
     setIsModalOpen(true);
   };
+
   const openEdit = (item, type, parentId = null) => {
     setCurrentItem({ ...item, parentId });
     setModalType(type);
     setImagePreview(item.image || null);
     setIsModalOpen(true);
   };
+
   const openDelete = (item, type, parentId = null) => {
     setCurrentItem({ ...item, parentId });
     setModalType("delete");
@@ -80,8 +90,12 @@ export default function Categories() {
 
   const closeModal = () => {
     setIsModalOpen(false);
-    setCurrentItem(null);
-    setImagePreview(null);
+    // Esperar un poco para limpiar estado visual si se desea, o limpiar directo:
+    setTimeout(() => {
+      setCurrentItem(null);
+      setImagePreview(null);
+      setModalType("");
+    }, 200);
   };
 
   const handleImageChange = (e) => {
@@ -105,7 +119,7 @@ export default function Categories() {
           subcategories: [],
         };
         await addDoc(catCollection, newCat);
-        alert("Categoría creada en la nube ☁️");
+        toast.success("Categoría creada en la nube ☁️");
       } else if (modalType === "addSub") {
         const parentId = parentSelectRef.current.value;
         const parentCat = categories.find((c) => c.id === parentId);
@@ -119,7 +133,7 @@ export default function Categories() {
           const updatedSubs = [...(parentCat.subcategories || []), newSub];
           const catRef = doc(db, "categories", parentId);
           await updateDoc(catRef, { subcategories: updatedSubs });
-          alert("Subcategoría guardada en la nube ☁️");
+          toast.success("Subcategoría guardada en la nube ☁️");
         }
       }
 
@@ -127,7 +141,7 @@ export default function Categories() {
       closeModal();
     } catch (error) {
       console.error("Error al guardar:", error);
-      alert("Error guardando en la nube");
+      toast.error("Error guardando en la nube");
     }
   };
 
@@ -158,9 +172,10 @@ export default function Categories() {
 
       fetchCategories();
       closeModal();
+      toast.success("Actualizado correctamente");
     } catch (error) {
       console.error("Error actualizando:", error);
-      alert("Error al actualizar");
+      toast.error("Error al actualizar");
     }
   };
 
@@ -169,6 +184,7 @@ export default function Categories() {
     try {
       if (modalType === "delete") {
         if (currentItem.parentId) {
+          // Borrar subcategoría
           const parentCat = categories.find(
             (c) => c.id === currentItem.parentId
           );
@@ -180,14 +196,16 @@ export default function Categories() {
             await updateDoc(catRef, { subcategories: updatedSubs });
           }
         } else {
+          // Borrar categoría completa
           await deleteDoc(doc(db, "categories", currentItem.id));
         }
       }
       fetchCategories();
       closeModal();
+      toast.success("Eliminado correctamente");
     } catch (error) {
       console.error("Error eliminando:", error);
-      alert("Error al eliminar");
+      toast.error("Error al eliminar");
     }
   };
 
@@ -198,13 +216,14 @@ export default function Categories() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
+      {/* HEADER */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">
             Categorías de Productos
           </h1>
           <p className="text-sm text-slate-500">
-            Organiza tu inventario (Conectado a la Nube ☁️)
+            Organiza tu inventario
           </p>
         </div>
         <div className="flex gap-3">
@@ -223,6 +242,7 @@ export default function Categories() {
         </div>
       </div>
 
+      {/* LISTA DE CATEGORÍAS */}
       <div className="space-y-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
         {loading ? (
           <div className="text-center py-8 text-slate-400">
@@ -231,6 +251,7 @@ export default function Categories() {
         ) : (
           categories.map((category, index) => (
             <div key={category.id}>
+              {/* Categoría Padre */}
               <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200 group hover:border-blue-300 transition-all">
                 <div className="flex items-center gap-4">
                   <span className="font-bold text-blue-600">{index + 1}.</span>
@@ -260,6 +281,8 @@ export default function Categories() {
                   </button>
                 </div>
               </div>
+
+              {/* Subcategorías */}
               <div className="ml-8 mt-2 space-y-2 border-l-2 border-slate-100 pl-4">
                 {category.subcategories &&
                   category.subcategories.map((sub) => (
@@ -300,9 +323,11 @@ export default function Categories() {
         )}
       </div>
 
+      {/* --- MODAL --- */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm transition-all">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+            {/* HEADER DEL MODAL (Dinámico según modalType) */}
             <div className="flex justify-between items-center p-6 border-b border-slate-100">
               <h3 className="text-xl font-bold text-slate-800">
                 {modalType === "addCategory" && "Agregar Categoría"}
@@ -317,8 +342,12 @@ export default function Categories() {
                 <X size={24} />
               </button>
             </div>
+
+            {/* CONTENIDO DEL MODAL (Renderizado Condicional) */}
             <div className="p-6">
-              {["addCategory", "editCategory"].includes(modalType) && (
+              {/* FORMULARIO CATEGORÍAS */}
+              {(modalType === "addCategory" ||
+                modalType === "editCategory") && (
                 <form
                   onSubmit={
                     modalType === "addCategory" ? handleAdd : handleUpdate
@@ -376,7 +405,9 @@ export default function Categories() {
                   </button>
                 </form>
               )}
-              {["addSub", "editSub"].includes(modalType) && (
+
+              {/* FORMULARIO SUBCATEGORÍAS */}
+              {(modalType === "addSub" || modalType === "editSub") && (
                 <form
                   onSubmit={modalType === "addSub" ? handleAdd : handleUpdate}
                   className="space-y-6"
@@ -424,6 +455,8 @@ export default function Categories() {
                   </button>
                 </form>
               )}
+
+              {/* CONFIRMACIÓN BORRAR */}
               {modalType === "delete" && (
                 <div className="text-center">
                   <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">

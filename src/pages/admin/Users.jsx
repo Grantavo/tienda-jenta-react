@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Plus, Trash2, Edit2, Shield, Check, X, Key, Lock } from "lucide-react";
 
+// 1. IMPORTAR SONNER
+import { toast } from "sonner";
+
 // IMPORTAR FIREBASE
 import { db } from "../../firebase/config";
 import {
@@ -100,9 +103,12 @@ export default function Users() {
         console.log("⚠️ BD vacía. Creando usuario por defecto...");
         const newUserRef = await addDoc(usersRef, DEFAULT_ADMIN_USER);
         usersData.push({ id: newUserRef.id, ...DEFAULT_ADMIN_USER });
-        alert(
-          `Usuario Maestro Creado:\nEmail: ${DEFAULT_ADMIN_USER.email}\nPass: ${DEFAULT_ADMIN_USER.password}`
-        );
+
+        // REEMPLAZO DE ALERT
+        toast.success("Usuario Maestro Creado", {
+          description: `Email: ${DEFAULT_ADMIN_USER.email} | Pass: ${DEFAULT_ADMIN_USER.password}`,
+          duration: 10000, // Duración extra para que alcancen a leer
+        });
       }
 
       // Ordenar roles
@@ -115,6 +121,7 @@ export default function Users() {
       localStorage.setItem("shopUsers", JSON.stringify(usersData));
     } catch (error) {
       console.error("Error cargando datos:", error);
+      toast.error("Error cargando la base de datos");
     } finally {
       setLoading(false);
     }
@@ -150,22 +157,25 @@ export default function Users() {
       if (editingId) {
         const userRef = doc(db, "users", editingId);
         await updateDoc(userRef, userData);
-        alert("Usuario actualizado ✅");
+        toast.success("Usuario actualizado ✅");
       } else {
-        if (!userForm.password) return alert("La contraseña es obligatoria");
+        if (!userForm.password) {
+          toast.warning("La contraseña es obligatoria");
+          return;
+        }
         await addDoc(collection(db, "users"), {
           // Usamos collection directo
           ...userData,
           createdAt: getTodayDate(),
           isSystem: false,
         });
-        alert("Usuario creado exitosamente 🚀");
+        toast.success("Usuario creado exitosamente 🚀");
       }
       closeModal();
       fetchData();
     } catch (error) {
       console.error("Error:", error);
-      alert("Error al guardar");
+      toast.error("Error al guardar usuario");
     }
   };
 
@@ -175,7 +185,8 @@ export default function Users() {
     const userRole = roles.find((r) => r.id === userToDelete?.roleId);
 
     if (userRole?.isSystem) {
-      return alert("No puedes eliminar a un usuario con rol de Sistema.");
+      toast.error("No puedes eliminar a un usuario con rol de Sistema.");
+      return;
     }
 
     if (
@@ -184,8 +195,10 @@ export default function Users() {
       try {
         await deleteDoc(doc(db, "users", id));
         fetchData();
+        toast.info("Usuario eliminado");
       } catch (error) {
         console.error("Error eliminando:", error);
+        toast.error("No se pudo eliminar");
       }
     }
   };
@@ -201,41 +214,46 @@ export default function Users() {
       if (editingId) {
         const roleRef = doc(db, "roles", editingId);
         await updateDoc(roleRef, roleData);
-        alert("Rol actualizado ✅");
+        toast.success("Rol actualizado ✅");
       } else {
         await addDoc(collection(db, "roles"), {
           // Usamos collection directo
           ...roleData,
           isSystem: false,
         });
-        alert("Rol creado exitosamente 🚀");
+        toast.success("Rol creado exitosamente 🚀");
       }
       closeModal();
       fetchData();
     } catch (error) {
       console.error("Error:", error);
-      alert("Error al guardar rol");
+      toast.error("Error al guardar rol");
     }
   };
 
   const deleteRole = async (id) => {
     const roleToDelete = roles.find((r) => r.id === id);
     if (roleToDelete?.isSystem) {
-      return alert("Este rol es vital para el sistema. No se puede borrar.");
+      toast.error("Este rol es vital para el sistema. No se puede borrar.");
+      return;
     }
 
     const usersInRole = users.filter((u) => u.roleId === id);
-    if (usersInRole.length > 0)
-      return alert(
+    if (usersInRole.length > 0) {
+      toast.warning(
         `No puedes borrar este rol porque hay ${usersInRole.length} usuarios usándolo.`
       );
+      return;
+    }
 
     if (window.confirm("¿Eliminar Rol de la nube?")) {
       try {
         await deleteDoc(doc(db, "roles", id));
         fetchData();
+        toast.info("Rol eliminado");
       } catch (error) {
         console.error("Error eliminando rol:", error);
+        toast.error("Error al eliminar rol");
       }
     }
   };
@@ -266,10 +284,12 @@ export default function Users() {
   };
 
   const openEditRole = (role) => {
-    if (role.isSystem)
-      return alert(
+    if (role.isSystem) {
+      toast.info(
         "El rol de Sistema tiene permisos automáticos y no debe editarse manualmente."
       );
+      return;
+    }
     setRoleForm({ name: role.name, permissions: role.permissions });
     setEditingId(role.id);
     setActiveTab("roles");
@@ -300,7 +320,7 @@ export default function Users() {
             Gestión de Acceso
           </h1>
           <p className="text-sm text-slate-500">
-            Administra quién puede entrar y qué puede ver (Nube ☁️).
+            Administra tu equipo de trabajo.
           </p>
         </div>
         <div className="flex bg-white rounded-lg p-1 border border-slate-200 shadow-sm">

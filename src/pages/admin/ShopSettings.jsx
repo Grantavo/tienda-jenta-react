@@ -10,7 +10,10 @@ import {
   ExternalLink,
 } from "lucide-react";
 
-// 1. IMPORTAR FIREBASE
+// 1. IMPORTAR SONNER
+import { toast } from "sonner";
+
+// 2. IMPORTAR FIREBASE
 import { db } from "../../firebase/config";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
@@ -66,6 +69,7 @@ export default function ShopSettings() {
         }
       } catch (error) {
         console.error("Error cargando configuración:", error);
+        toast.error("Error al cargar la configuración");
       } finally {
         setLoading(false);
       }
@@ -82,10 +86,12 @@ export default function ShopSettings() {
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      if (file.size > 1000000)
-        return alert(
-          "⚠️ La imagen es muy pesada (Máx 1MB). Intenta con una más ligera."
-        );
+      if (file.size > 1000000) {
+        toast.warning("Imagen muy pesada", {
+          description: "Intenta con una imagen menor a 1MB.",
+        });
+        return;
+      }
 
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -129,10 +135,12 @@ export default function ShopSettings() {
       link.click();
       document.body.removeChild(link);
 
-      alert(`¡QR Generado!\nEste código redirige a: ${targetUrl}`);
+      toast.success("¡QR Generado!", {
+        description: `Este código redirige a: ${targetUrl}`,
+      });
     } catch (error) {
       console.error(error);
-      alert("Error generando el QR. Verifica tu conexión.");
+      toast.error("Error generando el QR");
     }
   };
 
@@ -159,18 +167,20 @@ export default function ShopSettings() {
       document.title = formData.nombre;
       window.dispatchEvent(new Event("storage"));
 
-      alert(`¡Configuración guardada y sincronizada en la nube! ☁️`);
+      toast.success("¡Configuración guardada!", {
+        description: "Los cambios ya están en la nube ☁️",
+      });
     } catch (error) {
       console.error("Error al guardar:", error);
       if (
         error.code === "resource-exhausted" ||
         error.message.includes("exceeds the maximum allowed size")
       ) {
-        alert(
-          "❌ Error: La imagen del logo es demasiado pesada para la base de datos. Por favor usa una imagen más pequeña (menos de 1MB)."
-        );
+        toast.error("Error de tamaño", {
+          description: "La imagen es muy pesada para la base de datos.",
+        });
       } else {
-        alert("Error al guardar la configuración.");
+        toast.error("Error al guardar la configuración");
       }
     }
   };
@@ -244,6 +254,10 @@ export default function ShopSettings() {
           </div>
           <p className="mt-4 text-sm font-medium text-slate-600">
             Logo de la Tienda
+          </p>
+          {/* --- AQUÍ ESTÁ LA NUEVA SUGERENCIA --- */}
+          <p className="text-xs text-slate-400 mt-1">
+            Sugerido: Formato cuadrado (1:1), mín. 300x300px
           </p>
         </div>
 

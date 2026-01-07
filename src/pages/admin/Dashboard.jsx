@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import StatCard from "../../components/admin/StatCard";
 import {
@@ -27,43 +27,14 @@ import {
 import { db } from "../../firebase/config";
 import { collection, getDocs } from "firebase/firestore";
 
-// --- DATOS FIJOS PARA GRÁFICOS (Visual) ---
-const dataSemana = [
-  { name: "Lun", ventas: 4000 },
-  { name: "Mar", ventas: 3000 },
-  { name: "Mie", ventas: 2000 },
-  { name: "Jue", ventas: 2780 },
-  { name: "Vie", ventas: 1890 },
-  { name: "Sab", ventas: 2390 },
-  { name: "Dom", ventas: 3490 },
+const COLORS = ["#4285F4", "#DB4437", "#F4B400", "#0F9D58", "#8E24AA"];
+
+// --- CONFIGURACIÓN DE VISTAS (INTACTA) ---
+const VIEW_OPTIONS = [
+  { id: "semana", label: "Semana" },
+  { id: "anio", label: "Año" },
+  { id: "historico", label: "Histórico" },
 ];
-const dataAnio = [
-  { name: "Ene", ventas: 45000 },
-  { name: "Feb", ventas: 32000 },
-  { name: "Mar", ventas: 58000 },
-  { name: "Abr", ventas: 42000 },
-  { name: "May", ventas: 50000 },
-  { name: "Jun", ventas: 65000 },
-  { name: "Jul", ventas: 38000 },
-  { name: "Ago", ventas: 48000 },
-  { name: "Sep", ventas: 52000 },
-  { name: "Oct", ventas: 61000 },
-  { name: "Nov", ventas: 75000 },
-  { name: "Dic", ventas: 90000 },
-];
-const dataHistorico = [
-  { name: "2022", ventas: 450000 },
-  { name: "2023", ventas: 680000 },
-  { name: "2024", ventas: 920000 },
-  { name: "2025", ventas: 120000 },
-];
-const dataProductosTop = [
-  { name: "Smartphone X", value: 400 },
-  { name: "Laptop Pro", value: 300 },
-  { name: "Auriculares", value: 300 },
-  { name: "Smartwatch", value: 200 },
-];
-const COLORS = ["#4285F4", "#DB4437", "#F4B400", "#0F9D58"];
 
 export default function Dashboard() {
   const [viewMode, setViewMode] = useState("anio");
@@ -72,6 +43,11 @@ export default function Dashboard() {
   // ESTADOS DE DATOS REALES
   const [realUsers, setRealUsers] = useState([]);
   const [realRoles, setRealRoles] = useState([]);
+
+  // Datos crudos para cálculos
+  const [paidOrders, setPaidOrders] = useState([]);
+  const [topProductsData, setTopProductsData] = useState([]);
+
   const [counts, setCounts] = useState({
     users: 0,
     products: 0,
@@ -79,7 +55,7 @@ export default function Dashboard() {
     banners: 0,
     orders: 0,
     coupons: 0,
-    totalSales: 0, // Nuevo dato para el gráfico circular
+    totalSales: 0,
   });
 
   // 2. EFECTO: CARGAR DATOS DESDE FIREBASE
@@ -87,14 +63,13 @@ export default function Dashboard() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        // Ejecutamos todas las consultas en paralelo para mayor velocidad
         const [
           usersSnap,
           productsSnap,
           catsSnap,
           ordersSnap,
           bannersSnap,
-          couponsSnap, // Asumiendo colección 'coupons' para marketing
+          couponsSnap,
           rolesSnap,
         ] = await Promise.all([
           getDocs(collection(db, "users")),
@@ -106,17 +81,51 @@ export default function Dashboard() {
           getDocs(collection(db, "roles")),
         ]);
 
-        // A. Calcular Conteos
-        const activeOrders = ordersSnap.docs.filter((d) => {
-          const s = d.data().status;
-          return s !== "Entregado" && s !== "Anulado";
+        const orders = ordersSnap.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+
+        // --- CORRECCIÓN LÓGICA AQUÍ ---
+
+        // A. Calcular Conteos (Operativos)
+        // EXCLUIMOS: Entregado, Anulado Y ELIMINADO
+        const activeOrders = orders.filter((o) => {
+          const s = o.status;
+          return s !== "Entregado" && s !== "Anulado" && s !== "Eliminado";
         }).length;
 
-        // B. Calcular Total Ventas (Suma real de pedidos)
-        let totalSalesCalc = 0;
-        ordersSnap.forEach((doc) => {
-          totalSalesCalc += Number(doc.data().total) || 0;
+        // B. Filtrar solo ventas reales (Pagadas, No Anuladas, No Eliminadas)
+        const validPaidOrders = orders.filter(
+          (o) =>
+            o.status !== "Anulado" &&
+            o.status !== "Eliminado" &&
+            o.isPaid === true
+        );
+        setPaidOrders(validPaidOrders);
+
+        // C. Calcular Total Dinero Real
+        const totalSalesCalc = validPaidOrders.reduce(
+          (acc, curr) => acc + (Number(curr.total) || 0),
+          0
+        );
+
+        // D. Calcular Top Productos
+        const productCount = {};
+        validPaidOrders.forEach((order) => {
+          if (order.items && Array.isArray(order.items)) {
+            order.items.forEach((item) => {
+              const title = item.title || "Producto";
+              productCount[title] =
+                (productCount[title] || 0) + (item.qty || 1);
+            });
+          }
         });
+        const topProd = Object.entries(productCount)
+          .map(([name, value]) => ({ name, value }))
+          .sort((a, b) => b.value - a.value)
+          .slice(0, 4);
+        setTopProductsData(topProd);
 
         setCounts({
           users: usersSnap.size,
@@ -128,12 +137,11 @@ export default function Dashboard() {
           totalSales: totalSalesCalc,
         });
 
-        // C. Datos para la Tabla de Usuarios
+        // E. Datos Usuarios
         const usersData = usersSnap.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
         }));
-        // Invertimos para ver los últimos registrados primero
         setRealUsers(usersData.reverse());
 
         const rolesData = rolesSnap.docs.map((doc) => ({
@@ -151,18 +159,97 @@ export default function Dashboard() {
     fetchData();
   }, []);
 
-  const getChartData = () => {
-    switch (viewMode) {
-      case "semana":
-        return dataSemana;
-      case "anio":
-        return dataAnio;
-      case "historico":
-        return dataHistorico;
-      default:
-        return dataAnio;
+  // 3. CÁLCULO DINÁMICO DE LA GRÁFICA (useMemo)
+  const chartData = useMemo(() => {
+    // Helper para fechas
+    const getOrderDate = (order) => {
+      if (order.createdAt?.seconds)
+        return new Date(order.createdAt.seconds * 1000);
+      if (order.date) {
+        return new Date();
+      }
+      return new Date();
+    };
+
+    if (viewMode === "semana") {
+      // Últimos 7 días
+      const daysMap = {};
+      const daysOrder = [];
+      const now = new Date();
+
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(now.getDate() - i);
+        const dayName = d.toLocaleDateString("es-CO", { weekday: "short" });
+        const label = dayName.charAt(0).toUpperCase() + dayName.slice(1);
+        daysMap[label] = 0;
+        daysOrder.push(label);
+      }
+
+      paidOrders.forEach((order) => {
+        const d = getOrderDate(order);
+        const diffTime = Math.abs(now - d);
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        if (diffDays <= 7) {
+          const dayName = d.toLocaleDateString("es-CO", { weekday: "short" });
+          const label = dayName.charAt(0).toUpperCase() + dayName.slice(1);
+          if (daysMap[label] !== undefined) {
+            daysMap[label] += Number(order.total) || 0;
+          }
+        }
+      });
+      return daysOrder.map((label) => ({
+        name: label,
+        ventas: daysMap[label],
+      }));
     }
-  };
+
+    if (viewMode === "anio") {
+      // Meses del año actual
+      const currentYear = new Date().getFullYear();
+      const months = [
+        "Ene",
+        "Feb",
+        "Mar",
+        "Abr",
+        "May",
+        "Jun",
+        "Jul",
+        "Ago",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dic",
+      ];
+      const salesByMonth = {};
+      months.forEach((m) => (salesByMonth[m] = 0));
+
+      paidOrders.forEach((order) => {
+        const d = getOrderDate(order);
+        if (d.getFullYear() === currentYear) {
+          const monthName = months[d.getMonth()];
+          salesByMonth[monthName] += Number(order.total) || 0;
+        }
+      });
+      return months.map((m) => ({ name: m, ventas: salesByMonth[m] }));
+    }
+
+    if (viewMode === "historico") {
+      // Agrupar por año
+      const salesByYear = {};
+      paidOrders.forEach((order) => {
+        const d = getOrderDate(order);
+        const year = d.getFullYear().toString();
+        salesByYear[year] =
+          (salesByYear[year] || 0) + (Number(order.total) || 0);
+      });
+      return Object.keys(salesByYear)
+        .sort()
+        .map((y) => ({ name: y, ventas: salesByYear[y] }));
+    }
+
+    return [];
+  }, [viewMode, paidOrders]);
 
   // Helper de precio
   const formatPriceCompact = (price) => {
@@ -171,6 +258,14 @@ export default function Dashboard() {
       currency: "COP",
       notation: "compact",
       maximumFractionDigits: 1,
+    }).format(price);
+  };
+
+  const formatPriceFull = (price) => {
+    return new Intl.NumberFormat("es-CO", {
+      style: "currency",
+      currency: "COP",
+      maximumFractionDigits: 0,
     }).format(price);
   };
 
@@ -267,17 +362,17 @@ export default function Dashboard() {
             </h3>
 
             <div className="flex bg-slate-100 p-1 rounded-lg text-sm">
-              {["semana", "anio", "historico"].map((mode) => (
+              {VIEW_OPTIONS.map((option) => (
                 <button
-                  key={mode}
-                  onClick={() => setViewMode(mode)}
+                  key={option.id}
+                  onClick={() => setViewMode(option.id)}
                   className={`px-4 py-1 rounded-md transition-all capitalize ${
-                    viewMode === mode
+                    viewMode === option.id
                       ? "bg-white shadow-sm text-slate-800 font-bold"
                       : "text-slate-500 hover:text-slate-700"
                   }`}
                 >
-                  {mode}
+                  {option.label}
                 </button>
               ))}
             </div>
@@ -286,7 +381,7 @@ export default function Dashboard() {
           <div className="flex-1 w-full animate-in fade-in zoom-in duration-300">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
-                data={getChartData()}
+                data={chartData}
                 margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
               >
                 <defs>
@@ -312,6 +407,7 @@ export default function Dashboard() {
                   tick={{ fill: "#94a3b8", fontSize: 12 }}
                 />
                 <Tooltip
+                  formatter={(value) => formatPriceFull(value)}
                   contentStyle={{
                     backgroundColor: "#fff",
                     borderRadius: "12px",
@@ -342,7 +438,7 @@ export default function Dashboard() {
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
-                  data={dataProductosTop}
+                  data={topProductsData}
                   cx="50%"
                   cy="50%"
                   innerRadius={80}
@@ -350,7 +446,7 @@ export default function Dashboard() {
                   paddingAngle={5}
                   dataKey="value"
                 >
-                  {dataProductosTop.map((entry, index) => (
+                  {topProductsData.map((entry, index) => (
                     <Cell
                       key={`cell-${index}`}
                       fill={COLORS[index % COLORS.length]}

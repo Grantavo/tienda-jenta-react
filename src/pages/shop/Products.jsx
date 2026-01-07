@@ -1,12 +1,12 @@
-import React, { useState, useEffect } from "react";
+import React, { useMemo } from "react"; // 1. Traemos useMemo
 import { useLocation, Link } from "react-router-dom";
 import { Tag, X, Search } from "lucide-react";
 
-// 1. IMPORTAR FIREBASE
-import { db } from "../../firebase/config";
-import { collection, getDocs } from "firebase/firestore";
+// 2. Ya no importamos nada de Firebase aquí. ¡El componente es agnóstico a la DB!
+// import { db } ... (ELIMINADO)
 
-// 2. IMPORTAR TU TARJETA MAESTRA (Esto es lo que replica el diseño)
+// 3. Importamos nuestro Hook
+import { useProducts } from "../../hooks/useProducts";
 import ProductCard from "../../components/ProductCard";
 
 export default function ShopProducts() {
@@ -15,45 +15,41 @@ export default function ShopProducts() {
   const searchTerm = queryParams.get("buscar") || "";
   const isOfferMode = queryParams.get("oferta") === "true";
 
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // 4. USAMOS EL HOOK: Una línea para gobernar todos los datos
+  const { products, loading, error } = useProducts();
 
-  useEffect(() => {
-    const fetchProducts = async () => {
-      setLoading(true);
-      try {
-        const querySnapshot = await getDocs(collection(db, "products"));
-        const allProducts = querySnapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
+  // 5. OPTIMIZACIÓN con useMemo:
+  // "Memoriza" el resultado del filtrado. Solo se vuelve a calcular si
+  // cambia la lista de 'products', el 'searchTerm' o el modo 'isOfferMode'.
+  // Esto hace que la app se sienta más rápida.
+  const filteredProducts = useMemo(() => {
+    let result = products;
 
-        let result = allProducts;
+    if (searchTerm) {
+      result = result.filter((p) =>
+        p.title?.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
 
-        if (searchTerm) {
-          result = result.filter((p) =>
-            p.title.toLowerCase().includes(searchTerm.toLowerCase())
-          );
-        }
+    if (isOfferMode) {
+      result = result.filter((p) => {
+        const price = Number(p.price) || 0;
+        const oldPrice = Number(p.oldPrice) || 0;
+        return oldPrice > price;
+      });
+    }
 
-        if (isOfferMode) {
-          result = result.filter((p) => {
-            const price = Number(p.price) || 0;
-            const oldPrice = Number(p.oldPrice) || 0;
-            return oldPrice > price;
-          });
-        }
+    return result;
+  }, [products, searchTerm, isOfferMode]);
 
-        setProducts(result);
-      } catch (error) {
-        console.error("Error:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchProducts();
-  }, [searchTerm, isOfferMode]);
+  // Manejo de errores (Mejora de UX)
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-red-500 font-bold">
+        Ocurrió un error cargando los productos: {error}
+      </div>
+    );
+  }
 
   return (
     <div className="bg-slate-50 min-h-screen pb-20 font-sans">
@@ -73,9 +69,10 @@ export default function ShopProducts() {
             )}
           </h1>
           <p className="text-slate-500 text-sm">
+            {/* Usamos filteredProducts en lugar de products */}
             {loading
               ? "Cargando..."
-              : `${products.length} productos disponibles`}
+              : `${filteredProducts.length} productos disponibles`}
           </p>
           {(isOfferMode || searchTerm) && (
             <Link
@@ -91,20 +88,17 @@ export default function ShopProducts() {
       <div className="container mx-auto px-4 py-8">
         {/* GRILLA DE PRODUCTOS */}
         {loading ? (
+          // Reto futuro: Cambiar esto por un Skeleton
           <div className="text-center py-20 text-slate-400">
             Cargando catálogo...
           </div>
-        ) : products.length > 0 ? (
-          // --- AQUÍ ESTÁ LA MAGIA ---
+        ) : filteredProducts.length > 0 ? (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-            {products.map((product) => (
-              // Usamos el componente maestro en lugar de escribir todo el HTML
+            {filteredProducts.map((product) => (
               <ProductCard key={product.id} product={product} />
             ))}
           </div>
         ) : (
-          // --------------------------
-
           <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-slate-200">
             <Search className="mx-auto text-slate-300 mb-4" size={48} />
             <h3 className="text-xl font-bold text-slate-600">

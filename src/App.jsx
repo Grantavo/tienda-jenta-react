@@ -1,15 +1,16 @@
-import { useEffect } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+// 1. IMPORTAR EL COMPONENTE DE NOTIFICACIONES
+import { Toaster } from "sonner";
 
 // Layouts
 import ShopLayout from "./layouts/ShopLayout";
 import AdminLayout from "./layouts/AdminLayout";
 
-// Componente de Seguridad
-import RequireAuth from "./components/RequireAuth";
+// Guardián de Seguridad (Protección de Rutas)
+import ProtectedRoute from "./pages/auth/ProtectedRoute";
 
-// Páginas de Autenticación (RUTA CORREGIDA)
-import Login from "./pages/auth/Login"; // <--- Ahora apunta a src/pages/auth/Login
+// Páginas de Autenticación
+import Login from "./pages/auth/Login";
 
 // Páginas Tienda (Públicas)
 import Home from "./pages/Home";
@@ -30,54 +31,58 @@ import Marketing from "./pages/admin/Marketing";
 import Payments from "./pages/admin/Payments";
 import Migration from "./pages/admin/Migration";
 
+// Contexto Global
+import { CartProvider } from "./context/CartContext";
+
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        {/* RUTA LOGIN */}
-        <Route path="/login" element={<Login />} />
+    <CartProvider>
+      <BrowserRouter>
+        <Routes>
+          {/* RUTA LOGIN (Pública) */}
+          <Route path="/login" element={<Login />} />
 
-        {/* TIENDA (Pública) */}
-        <Route path="/" element={<ShopLayout />}>
-          <Route index element={<Home />} />
-          <Route path="categoria/:id" element={<CategoryPage />} />
-          <Route path="producto/:id" element={<ProductDetail />} />
-          <Route path="productos" element={<ShopProducts />} />
-        </Route>
+          {/* TIENDA (Pública) */}
+          <Route path="/" element={<ShopLayout />}>
+            <Route index element={<Home />} />
+            <Route path="categoria/:id" element={<CategoryPage />} />
+            <Route path="producto/:id" element={<ProductDetail />} />
+            <Route path="productos" element={<ShopProducts />} />
+          </Route>
 
-        {/* ADMIN (Protegida con Firebase Auth) */}
-        <Route
-          path="/admin"
-          element={
-            <RequireAuth>
-              <AdminLayout />
-            </RequireAuth>
-          }
-        >
-          <Route index element={<Dashboard />} />
+          {/* --- ZONA BLINDADA (ADMIN) --- */}
+          {/* ProtectedRoute verifica la sesión antes de renderizar AdminLayout */}
+          <Route element={<ProtectedRoute />}>
+            <Route path="/admin" element={<AdminLayout />}>
+              <Route index element={<Dashboard />} />
 
-          {/* Módulos de Gestión */}
-          <Route path="pedidos" element={<Orders />} />
-          <Route path="productos" element={<Products />} />
-          <Route path="categorias" element={<Categories />} />
-          <Route path="clientes" element={<Clients />} />
-          <Route path="usuarios" element={<Users />} />
+              {/* Módulos de Gestión */}
+              <Route path="pedidos" element={<Orders />} />
+              <Route path="productos" element={<Products />} />
+              <Route path="categorias" element={<Categories />} />
+              <Route path="clientes" element={<Clients />} />
+              <Route path="usuarios" element={<Users />} />
 
-          {/* Módulos de Tienda y Marketing */}
-          <Route path="banners" element={<Banners />} />
-          <Route path="marketing" element={<Marketing />} />
-          <Route path="pagos" element={<Payments />} />
-          <Route path="ajustes" element={<ShopSettings />} />
+              {/* Módulos de Tienda y Marketing */}
+              <Route path="banners" element={<Banners />} />
+              <Route path="marketing" element={<Marketing />} />
+              <Route path="pagos" element={<Payments />} />
+              <Route path="ajustes" element={<ShopSettings />} />
 
-          {/* Herramientas */}
-          <Route path="migrar" element={<Migration />} />
+              {/* Herramientas */}
+              <Route path="migrar" element={<Migration />} />
 
-          <Route
-            path="envios"
-            element={<h1 className="p-8">Envíos (Próximamente)</h1>}
-          />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+              <Route
+                path="envios"
+                element={<h1 className="p-8">Envíos (Próximamente)</h1>}
+              />
+            </Route>
+          </Route>
+        </Routes>
+      </BrowserRouter>
+
+      {/* 2. COMPONENTE GLOBAL DE NOTIFICACIONES (FUERA DEL ROUTER) */}
+      <Toaster position="top-center" richColors />
+    </CartProvider>
   );
 }

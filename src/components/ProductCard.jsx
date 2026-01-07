@@ -2,36 +2,28 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { ShoppingCart, Search } from "lucide-react";
+// Importamos el hook que contiene la lógica de negocio
+import { useProductPrice } from "../hooks/useProductPrice";
 
 export default function ProductCard({ product }) {
-  // 1. Lógica de Datos
-  const price = Number(product.price) || 0;
-  const oldPrice = Number(product.oldPrice) || 0;
-  const stock = Number(product.stock) || 0;
+  // 1. Lógica extraída al Hook (Rendimiento + Limpieza)
+  const {
+    formattedPrice,
+    formattedOldPrice,
+    hasDiscount,
+    discountPercent,
+    isOutOfStock,
+  } = useProductPrice(product);
+
+  // 2. Datos simples de UI
   const brand = product.brand || "Genérica";
   const title = product.title || "Sin Título";
   const imageSrc =
     product.images && product.images[0] ? product.images[0] : null;
 
-  // 2. Cálculos
-  const hasDiscount = oldPrice > price;
-  const discountPercent = hasDiscount
-    ? Math.round(((oldPrice - price) / oldPrice) * 100)
-    : 0;
-  const isOutOfStock = stock <= 0;
-
-  // 3. Formateador de Moneda
-  const formatPrice = (value) => {
-    return new Intl.NumberFormat("es-CO", {
-      style: "currency",
-      currency: "COP",
-      maximumFractionDigits: 0,
-    }).format(value);
-  };
-
   return (
     <div className="bg-white rounded-[20px] border border-slate-100 overflow-hidden hover:shadow-xl transition-all duration-300 group flex flex-col h-full relative">
-      {/* BADGE: Oferta (Rojo, arriba izquierda) */}
+      {/* BADGE: Oferta */}
       {hasDiscount && !isOutOfStock && (
         <span className="absolute top-4 left-4 bg-[#DC2626] text-white text-[11px] font-bold px-2.5 py-1 rounded-md z-10 shadow-sm">
           -{discountPercent}% OFF
@@ -80,11 +72,11 @@ export default function ProductCard({ product }) {
           </h3>
         </Link>
 
-        {/* Precios */}
+        {/* Precios (Usando los valores ya formateados del hook) */}
         <div className="mb-4">
           {hasDiscount && (
             <span className="block text-sm text-slate-400 line-through mb-0.5 font-medium">
-              {formatPrice(oldPrice)}
+              {formattedOldPrice}
             </span>
           )}
           <span
@@ -92,7 +84,7 @@ export default function ProductCard({ product }) {
               hasDiscount ? "text-[#DC2626]" : "text-slate-800"
             }`}
           >
-            {formatPrice(price)}
+            {formattedPrice}
           </span>
         </div>
 

@@ -10,16 +10,18 @@ import {
   Copy,
 } from "lucide-react";
 
+// 1. IMPORTAR SONNER Y FIREBASE
+import { toast } from "sonner";
+import { db } from "../../firebase/config";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+
 // Función segura para IDs
 const generateId = () => Date.now();
 
 export default function Payments() {
   // --- 1. ESTADOS ---
-  const [payments, setPayments] = useState(() => {
-    const saved = localStorage.getItem("shopPayments");
-    return saved ? JSON.parse(saved) : [];
-  });
-
+  const [payments, setPayments] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Formulario
@@ -31,44 +33,98 @@ export default function Payments() {
   };
   const [form, setForm] = useState(initialForm);
 
-  // --- 2. PERSISTENCIA ---
+  // --- 2. CARGAR DESDE LA NUBE (FIREBASE) ---
   useEffect(() => {
-    localStorage.setItem("shopPayments", JSON.stringify(payments));
-  }, [payments]);
+    const fetchPayments = async () => {
+      setLoading(true);
+      try {
+        const docRef = doc(db, "settings", "payments");
+        const docSnap = await getDoc(docRef);
 
-  // --- 3. FUNCIONES ---
-  const handleSave = (e) => {
+        if (docSnap.exists()) {
+          setPayments(docSnap.data().methods || []);
+        }
+      } catch (error) {
+        console.error("Error cargando pagos:", error);
+        toast.error("Error al conectar con la nube");
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchPayments();
+  }, []);
+
+  // --- 3. GUARDAR EN LA NUBE ---
+  const saveToCloud = async (newMethodsList) => {
+    try {
+      await setDoc(doc(db, "settings", "payments"), {
+        methods: newMethodsList,
+        updatedAt: new Date(),
+      });
+      // Sincronizar localmente para reactividad inmediata
+      localStorage.setItem("shopPayments", JSON.stringify(newMethodsList));
+      window.dispatchEvent(new Event("storage"));
+    } catch (error) {
+      console.error("Error guardando pagos:", error);
+      toast.error("No se pudo sincronizar con la nube");
+    }
+  };
+
+  // --- 4. FUNCIONES ---
+  const handleSave = async (e) => {
     e.preventDefault();
-    if (!form.type || !form.accountNumber)
-      return alert("Tipo y Número son obligatorios");
+    if (!form.type || !form.accountNumber) {
+      return toast.warning("Faltan datos", {
+        description: "Tipo y Número de cuenta son obligatorios",
+      });
+    }
 
     const newPayment = {
       ...form,
       id: generateId(),
     };
 
-    setPayments([...payments, newPayment]);
+    const updatedList = [...payments, newPayment];
+    setPayments(updatedList);
+    await saveToCloud(updatedList);
+
+    toast.success("Cuenta agregada correctamente");
     setForm(initialForm);
     setIsModalOpen(false);
   };
 
-  const deletePayment = (id) => {
+  const deletePayment = async (id) => {
     if (window.confirm("¿Eliminar este método de pago?")) {
-      setPayments(payments.filter((p) => p.id !== id));
+      const updatedList = payments.filter((p) => p.id !== id);
+      setPayments(updatedList);
+      await saveToCloud(updatedList);
+      toast.info("Método de pago eliminado");
     }
   };
 
-  const toggleStatus = (id) => {
-    setPayments(
-      payments.map((p) =>
-        p.id === id
-          ? { ...p, status: p.status === "active" ? "inactive" : "active" }
-          : p
-      )
+  const toggleStatus = async (id) => {
+    const updatedList = payments.map((p) =>
+      p.id === id
+        ? { ...p, status: p.status === "active" ? "inactive" : "active" }
+        : p
+    );
+    setPayments(updatedList);
+    await saveToCloud(updatedList);
+
+    const target = updatedList.find((p) => p.id === id);
+    toast.success(
+      target.status === "active" ? "Cuenta Activada" : "Cuenta Pausada"
     );
   };
 
-  // --- RENDER ---
+  if (loading) {
+    return (
+      <div className="p-10 text-center text-slate-400">
+        Cargando métodos de pago...
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
       {/* HEADER */}
@@ -118,10 +174,10 @@ export default function Payments() {
               </div>
               <button
                 onClick={() => toggleStatus(payment.id)}
-                className={`text-xs font-bold px-2 py-1 rounded ${
+                className={`text-xs font-bold px-2 py-1 rounded transition-colors ${
                   payment.status === "active"
-                    ? "bg-green-100 text-green-700"
-                    : "bg-slate-200 text-slate-500"
+                    ? "bg-green-100 text-green-700 hover:bg-green-200"
+                    : "bg-slate-200 text-slate-500 hover:bg-slate-300"
                 }`}
               >
                 {payment.status === "active" ? "Activo" : "Inactivo"}
@@ -152,12 +208,12 @@ export default function Payments() {
         )}
       </div>
 
-      {/* MODAL AGREGAR (Diseño basado en tu imagen) */}
+      {/* MODAL AGREGAR */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white p-8 rounded-2xl w-full max-w-lg shadow-2xl animate-in zoom-in duration-200">
             <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-100">
-              <h2 className="text-xl font-bold text-slate-800 text-blue-600 border-b-2 border-blue-600 pb-1">
+              <h2 className="text-xl font-bold text-slate-800">
                 Agregar Datos Bancarios
               </h2>
               <button onClick={() => setIsModalOpen(false)}>
@@ -240,7 +296,7 @@ export default function Payments() {
                 type="submit"
                 className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700 transition shadow-lg shadow-blue-600/20"
               >
-                Agregar
+                Agregar a la Nube
               </button>
             </form>
           </div>

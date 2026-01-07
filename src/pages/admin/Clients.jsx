@@ -10,10 +10,13 @@ import {
   X,
   Star,
   Trash2,
-  User, // Agregamos User por si no hay foto
+  User,
 } from "lucide-react";
 
-// 1. IMPORTAR FIREBASE
+// 1. IMPORTAR SONNER PARA ALERTAS
+import { toast } from "sonner";
+
+// IMPORTAR FIREBASE
 import { db } from "../../firebase/config";
 import {
   collection,
@@ -35,14 +38,12 @@ export default function Clients() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        // A. Cargar Clientes Reales
         const clientsSnap = await getDocs(collection(db, "clients"));
         const clientsData = clientsSnap.docs.map((d) => ({
           id: d.id,
           ...d.data(),
         }));
 
-        // B. Cargar Pedidos (para historial y estadísticas)
         const ordersSnap = await getDocs(collection(db, "orders"));
         const ordersData = ordersSnap.docs.map((d) => ({
           id: d.id,
@@ -53,6 +54,7 @@ export default function Clients() {
         setOrders(ordersData);
       } catch (error) {
         console.error("Error cargando datos:", error);
+        toast.error("Error al cargar la base de datos");
       } finally {
         setLoading(false);
       }
@@ -78,7 +80,6 @@ export default function Clients() {
 
   // --- 3. CÁLCULOS ---
   const getClientStats = (phone) => {
-    // Protección: Si no hay pedidos cargados, devolvemos 0
     if (!orders || orders.length === 0)
       return { count: 0, total: 0, history: [] };
 
@@ -102,6 +103,12 @@ export default function Clients() {
   // --- 4. FUNCIONES ---
   const handleSave = async (e) => {
     e.preventDefault();
+    if (!formData.name || !formData.phone) {
+      return toast.warning("Campos obligatorios", {
+        description: "El nombre y teléfono son necesarios.",
+      });
+    }
+
     try {
       const newClientData = {
         ...formData,
@@ -115,11 +122,12 @@ export default function Clients() {
       const savedClient = { id: docRef.id, ...newClientData };
       setClients([...clients, savedClient]);
 
+      toast.success("Cliente registrado con éxito");
       setIsModalOpen(false);
       setFormData(initialForm);
     } catch (error) {
       console.error("Error guardando cliente:", error);
-      alert("Error al guardar en la nube");
+      toast.error("Error al guardar en la nube");
     }
   };
 
@@ -129,8 +137,10 @@ export default function Clients() {
         await deleteDoc(doc(db, "clients", id));
         setClients(clients.filter((c) => c.id !== id));
         setSelectedClient(null);
+        toast.info("Cliente eliminado correctamente");
       } catch (error) {
         console.error("Error eliminando cliente:", error);
+        toast.error("No se pudo eliminar el cliente");
       }
     }
   };
@@ -151,8 +161,12 @@ export default function Clients() {
 
     try {
       await updateDoc(doc(db, "clients", id), { isVip: newVipStatus });
+      toast.success(
+        newVipStatus ? "Cliente marcado como VIP ✨" : "Estatus VIP removido"
+      );
     } catch (error) {
       console.error("Error actualizando VIP:", error);
+      toast.error("Error al actualizar estatus");
     }
   };
 
@@ -215,9 +229,7 @@ export default function Clients() {
 
       {/* CONTENIDO PRINCIPAL */}
       <div className="flex flex-col md:flex-row gap-6 h-full overflow-hidden pb-2">
-        {/* --- COLUMNA IZQUIERDA: LISTA --- */}
         <div className="w-full md:w-1/3 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
-          {/* Buscador */}
           <div className="p-4 border-b border-slate-100 shrink-0">
             <div className="relative">
               <Search
@@ -234,11 +246,9 @@ export default function Clients() {
             </div>
           </div>
 
-          {/* Lista Scrollable */}
           <div className="flex-1 overflow-y-auto custom-scrollbar">
             {filteredClients.map((client) => {
               const stats = getClientStats(client.phone);
-              // PROTECCIÓN: Validamos que 'name' exista antes de usar substring
               const displayName = client.name || "Sin Nombre";
               const avatarLetter = displayName.substring(0, 2).toUpperCase();
 
@@ -291,11 +301,9 @@ export default function Clients() {
           </div>
         </div>
 
-        {/* --- COLUMNA DERECHA: DETALLE 360 --- */}
         <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative flex flex-col">
           {selectedClient ? (
             <div className="flex-1 overflow-y-auto custom-scrollbar">
-              {/* HEADER DECORATIVO */}
               <div className="h-40 bg-gradient-to-r from-slate-800 to-slate-900 relative">
                 <button
                   onClick={() => deleteClient(selectedClient.id)}
@@ -305,20 +313,16 @@ export default function Clients() {
                 </button>
               </div>
 
-              {/* INFO PRINCIPAL */}
               <div className="px-8 -mt-16 pb-6 relative z-0">
                 <div className="flex justify-between items-end mb-6">
                   <div className="flex items-end gap-5">
-                    {/* Avatar Grande */}
                     <div className="w-28 h-28 bg-white rounded-full p-1.5 shadow-xl">
                       <div className="w-full h-full bg-slate-100 rounded-full flex items-center justify-center text-4xl font-bold text-slate-400">
-                        {/* PROTECCIÓN AQUÍ TAMBIÉN */}
                         {(selectedClient.name || "?")
                           .substring(0, 2)
                           .toUpperCase()}
                       </div>
                     </div>
-                    {/* Nombre y VIP */}
                     <div className="mb-3">
                       <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
                         {selectedClient.name || "Sin Nombre"}
@@ -344,7 +348,6 @@ export default function Clients() {
                     </div>
                   </div>
 
-                  {/* Botón Contactar */}
                   <button
                     onClick={() =>
                       openWhatsApp(selectedClient.phone, selectedClient.name)
@@ -356,7 +359,6 @@ export default function Clients() {
                   </button>
                 </div>
 
-                {/* Info Cards */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
                   <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100">
                     <p className="text-xs font-bold text-slate-400 uppercase mb-2">
@@ -388,7 +390,6 @@ export default function Clients() {
                   </div>
                 </div>
 
-                {/* Notas CRM */}
                 <div className="mb-8">
                   <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">
                     Notas Internas (Solo Admin)
@@ -404,7 +405,6 @@ export default function Clients() {
                   ></textarea>
                 </div>
 
-                {/* Historial de Pedidos */}
                 <div className="pb-8">
                   <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2 text-lg">
                     <ShoppingBag size={20} className="text-blue-600" />{" "}
@@ -493,19 +493,25 @@ export default function Clients() {
                 required
                 className="w-full p-3 border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition"
                 value={formData.name}
-                onChange={(e) =>
-                  setFormData({ ...formData, name: e.target.value })
-                }
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const formatted = val.replace(/(^\w|\s\w)/g, (m) =>
+                    m.toUpperCase()
+                  );
+                  setFormData({ ...formData, name: formatted });
+                }}
               />
               <input
-                type="number"
+                type="tel"
                 placeholder="Teléfono (WhatsApp)"
                 required
+                maxLength={10}
                 className="w-full p-3 border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition"
                 value={formData.phone}
-                onChange={(e) =>
-                  setFormData({ ...formData, phone: e.target.value })
-                }
+                onChange={(e) => {
+                  const val = e.target.value.replace(/\D/g, "");
+                  setFormData({ ...formData, phone: val });
+                }}
               />
               <input
                 type="email"

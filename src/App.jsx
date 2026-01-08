@@ -51,25 +51,48 @@ export default function App() {
           </Route>
 
           {/* --- ZONA BLINDADA (ADMIN) --- */}
-          {/* ProtectedRoute verifica la sesión antes de renderizar AdminLayout */}
+          {/* Este primer ProtectedRoute sin 'module' solo verifica que exista sesión */}
           <Route element={<ProtectedRoute />}>
             <Route path="/admin" element={<AdminLayout />}>
+              {/* Dashboard: Acceso permitido para cualquier usuario logueado */}
               <Route index element={<Dashboard />} />
 
-              {/* Módulos de Gestión */}
-              <Route path="pedidos" element={<Orders />} />
-              <Route path="productos" element={<Products />} />
-              <Route path="categorias" element={<Categories />} />
-              <Route path="clientes" element={<Clients />} />
-              <Route path="usuarios" element={<Users />} />
+              {/* Módulos con protección individual según el rol */}
+              <Route element={<ProtectedRoute module="pedidos" />}>
+                <Route path="pedidos" element={<Orders />} />
+              </Route>
 
-              {/* Módulos de Tienda y Marketing */}
-              <Route path="banners" element={<Banners />} />
-              <Route path="marketing" element={<Marketing />} />
-              <Route path="pagos" element={<Payments />} />
-              <Route path="ajustes" element={<ShopSettings />} />
+              <Route element={<ProtectedRoute module="productos" />}>
+                <Route path="productos" element={<Products />} />
+              </Route>
 
-              {/* Herramientas */}
+              <Route element={<ProtectedRoute module="categorias" />}>
+                <Route path="categorias" element={<Categories />} />
+              </Route>
+
+              <Route element={<ProtectedRoute module="clientes" />}>
+                <Route path="clientes" element={<Clients />} />
+              </Route>
+
+              <Route element={<ProtectedRoute module="usuarios" />}>
+                <Route path="usuarios" element={<Users />} />
+              </Route>
+
+              <Route element={<ProtectedRoute module="banners" />}>
+                <Route path="banners" element={<Banners />} />
+              </Route>
+
+              <Route element={<ProtectedRoute module="marketing" />}>
+                <Route path="marketing" element={<Marketing />} />
+              </Route>
+
+              {/* Ajustes y Pagos comparten el permiso de 'ajustes' */}
+              <Route element={<ProtectedRoute module="ajustes" />}>
+                <Route path="pagos" element={<Payments />} />
+                <Route path="ajustes" element={<ShopSettings />} />
+              </Route>
+
+              {/* Herramientas adicionales */}
               <Route path="migrar" element={<Migration />} />
 
               <Route
@@ -81,7 +104,7 @@ export default function App() {
         </Routes>
       </BrowserRouter>
 
-      {/* 2. COMPONENTE GLOBAL DE NOTIFICACIONES (FUERA DEL ROUTER) */}
+      {/* 2. COMPONENTE GLOBAL DE NOTIFICACIONES */}
       <Toaster position="top-center" richColors />
     </CartProvider>
   );

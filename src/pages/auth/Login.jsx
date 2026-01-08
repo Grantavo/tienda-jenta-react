@@ -6,6 +6,9 @@ import { Lock, Mail, ChevronRight, AlertCircle } from "lucide-react";
 import { db } from "../../firebase/config";
 import { collection, query, where, getDocs } from "firebase/firestore";
 
+// 1. IMPORTAR SONNER PARA UNA MEJOR EXPERIENCIA
+import { toast } from "sonner";
+
 export default function Login() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -16,7 +19,6 @@ export default function Login() {
     password: "",
   });
 
-  // VERIFICACIÓN INICIAL: Si ya hay sesión activa en esta pestaña, redirigir
   useEffect(() => {
     const session = sessionStorage.getItem("shopUser");
     if (session) {
@@ -30,40 +32,44 @@ export default function Login() {
     setLoading(true);
 
     try {
-      // 1. Consultar Firebase: Buscar usuario por email exacto
+      // 1. Consultar Usuario
       const q = query(
         collection(db, "users"),
         where("email", "==", formData.email.trim())
       );
-
       const querySnapshot = await getDocs(q);
 
-      // 2. Si no existe el email
       if (querySnapshot.empty) {
         setError("Credenciales inválidas. Verifica tu correo.");
         setLoading(false);
         return;
       }
 
-      // 3. Extraer datos del usuario
       const docSnap = querySnapshot.docs[0];
       const userData = { id: docSnap.id, ...docSnap.data() };
 
-      // 4. VALIDAR CONTRASEÑA (Texto plano según tu estructura actual)
+      // 2. Validar Contraseña
       if (userData.password !== formData.password) {
         setError("Contraseña incorrecta.");
         setLoading(false);
         return;
       }
 
-      // 5. SANITIZAR: No guardar la contraseña en el navegador
+      // --- PASO CRÍTICO PARA PERMISOS ---
+      // 3. Descargar los ROLES actuales de la nube antes de entrar
+      // Esto asegura que el Sidebar tenga la "llave" para abrir los menús
+      const rolesSnap = await getDocs(collection(db, "roles"));
+      const rolesData = rolesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      localStorage.setItem("shopRoles", JSON.stringify(rolesData));
+
+      // 4. Sanitizar y Guardar Sesión
       const safeUser = { ...userData };
       delete safeUser.password;
-
-      // 6. GUARDAR SESIÓN (SessionStorage = Sesión muere al cerrar pestaña)
       sessionStorage.setItem("shopUser", JSON.stringify(safeUser));
 
-      // 7. Redirigir al Dashboard
+      toast.success(`¡Bienvenido de nuevo, ${safeUser.name}!`);
+
+      // 5. Redirigir
       navigate("/admin", { replace: true });
     } catch (err) {
       console.error("Error login:", err);
@@ -92,7 +98,10 @@ export default function Login() {
 
         <form onSubmit={handleLogin} className="space-y-6">
           <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-500 uppercase ml-1">
+            <label
+              htmlFor="login-email"
+              className="text-xs font-bold text-slate-500 uppercase ml-1"
+            >
               Correo Electrónico
             </label>
             <div className="relative">
@@ -101,6 +110,8 @@ export default function Login() {
                 size={20}
               />
               <input
+                id="login-email"
+                name="email"
                 type="email"
                 required
                 className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 transition-all font-medium text-slate-700"
@@ -114,7 +125,10 @@ export default function Login() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-500 uppercase ml-1">
+            <label
+              htmlFor="login-password"
+              className="text-xs font-bold text-slate-500 uppercase ml-1"
+            >
               Contraseña
             </label>
             <div className="relative">
@@ -123,6 +137,8 @@ export default function Login() {
                 size={20}
               />
               <input
+                id="login-password"
+                name="password"
                 type="password"
                 required
                 className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 transition-all font-medium text-slate-700"

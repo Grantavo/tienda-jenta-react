@@ -17,18 +17,14 @@ import { doc, updateDoc, collection, getDocs } from "firebase/firestore";
 export default function AdminLayout() {
   const navigate = useNavigate();
 
-  // Cargamos usuario del sessionStorage
   const [currentUser, setCurrentUser] = useState(
     JSON.parse(sessionStorage.getItem("shopUser") || "{}")
   );
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
-
-  // ESTADO PARA LA VISIBILIDAD DEL HEADER
   const [isHeaderVisible, setIsHeaderVisible] = useState(true);
 
-  // Estados simples para búsqueda
   const [searchTerm, setSearchTerm] = useState("");
   const [showResults, setShowResults] = useState(false);
   const [firebaseData, setFirebaseData] = useState({
@@ -44,7 +40,6 @@ export default function AdminLayout() {
 
   const fileInputRef = useRef(null);
 
-  // Cargar datos una vez
   useEffect(() => {
     const loadData = async () => {
       try {
@@ -65,31 +60,21 @@ export default function AdminLayout() {
     loadData();
   }, []);
 
-  // --- MAGIA AQUÍ: DETECTOR AUTOMÁTICO DE MODALES ---
   useEffect(() => {
-    // Esta función verifica si hay algún modal abierto en la página
     const checkForModal = () => {
-      // Buscamos elementos que tengan las clases de tu modal (fixed + z-50)
       const modalExists = document.querySelector(".fixed.inset-0.z-50");
-
-      // Si existe un modal, ocultamos el header. Si no, lo mostramos.
       setIsHeaderVisible(!modalExists);
     };
 
-    // Creamos un "vigilante" que observa cambios en el cuerpo de la página
     const observer = new MutationObserver(checkForModal);
-
-    // Empezamos a vigilar
     observer.observe(document.body, {
-      childList: true, // Vigilar si se agregan/quitan elementos
-      subtree: true, // Vigilar en profundidad (dentro de otros divs)
+      childList: true,
+      subtree: true,
     });
 
-    // Limpieza al desmontar
     return () => observer.disconnect();
   }, []);
 
-  // Función Salir borra sessionStorage
   const handleLogout = () => {
     if (window.confirm("¿Cerrar sesión?")) {
       sessionStorage.removeItem("shopUser");
@@ -97,7 +82,6 @@ export default function AdminLayout() {
     }
   };
 
-  // Subir imagen
   const handleImageUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -118,7 +102,6 @@ export default function AdminLayout() {
     reader.readAsDataURL(file);
   };
 
-  // Buscador
   const handleSearch = (e) => {
     const term = e.target.value;
     setSearchTerm(term);
@@ -126,10 +109,10 @@ export default function AdminLayout() {
       const lower = term.toLowerCase();
       setResults({
         products: firebaseData.products
-          .filter((p) => p.title.toLowerCase().includes(lower))
+          .filter((p) => p.title?.toLowerCase().includes(lower))
           .slice(0, 3),
         users: firebaseData.users
-          .filter((u) => u.name.toLowerCase().includes(lower))
+          .filter((u) => u.name?.toLowerCase().includes(lower))
           .slice(0, 3),
         orders: firebaseData.orders
           .filter(
@@ -157,20 +140,18 @@ export default function AdminLayout() {
         isDarkMode ? "dark bg-slate-900 text-white" : ""
       }`}
     >
-      {/* 1. SIDEBAR */}
       <Sidebar />
 
-      {/* 2. COLUMNA DERECHA (HEADER + CONTENIDO) */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">
-        {/* HEADER: Solo se renderiza si isHeaderVisible es TRUE */}
         {isHeaderVisible && (
           <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between shadow-sm z-20 relative animate-in slide-in-from-top-2 duration-300">
-            {/* BUSCADOR */}
             <div className="relative w-80">
               <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
                 <Search size={18} />
               </div>
               <input
+                id="admin-search" // Agregado para quitar advertencia
+                name="admin-search" // Agregado para quitar advertencia
                 type="text"
                 placeholder="Buscar..."
                 className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 bg-slate-50 focus:bg-white outline-none focus:border-blue-500 text-slate-700"
@@ -178,7 +159,6 @@ export default function AdminLayout() {
                 onChange={handleSearch}
               />
 
-              {/* RESULTADOS FLOTANTES */}
               {showResults && (
                 <div className="absolute top-full left-0 w-full mt-2 bg-white border border-slate-200 shadow-xl rounded-lg p-2 z-50">
                   {results.products.map((p) => (
@@ -219,9 +199,7 @@ export default function AdminLayout() {
               )}
             </div>
 
-            {/* DERECHA HEADER */}
             <div className="flex items-center gap-4">
-              {/* PERFIL */}
               <div className="relative">
                 <button
                   onClick={() => setIsMenuOpen(!isMenuOpen)}
@@ -232,6 +210,7 @@ export default function AdminLayout() {
                       <img
                         src={currentUser.photoURL}
                         className="w-full h-full object-cover"
+                        alt="User"
                       />
                     ) : (
                       <User className="p-1" />
@@ -252,6 +231,7 @@ export default function AdminLayout() {
                           <img
                             src={currentUser.photoURL}
                             className="w-full h-full object-cover"
+                            alt="Profile"
                           />
                         ) : (
                           <User className="p-2" />
@@ -290,11 +270,16 @@ export default function AdminLayout() {
           </header>
         )}
 
-        {/* CONTENIDO PRINCIPAL (Outlet) */}
         <main className="flex-1 overflow-y-auto p-6 bg-slate-50 relative z-10">
           <Outlet />
         </main>
       </div>
+
+      {/* CORRECCIÓN: Se quitó el atributo 'jsx' que causaba el error en consola */}
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+      `}</style>
     </div>
   );
 }

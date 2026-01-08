@@ -51,7 +51,7 @@ export default function Categories() {
 
   // --- ESTADOS DEL MODAL ---
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalType, setModalType] = useState(""); // ej: 'addCategory', 'addSub', 'delete'
+  const [modalType, setModalType] = useState("");
   const [currentItem, setCurrentItem] = useState(null);
 
   // Referencias para los inputs
@@ -90,7 +90,6 @@ export default function Categories() {
 
   const closeModal = () => {
     setIsModalOpen(false);
-    // Esperar un poco para limpiar estado visual si se desea, o limpiar directo:
     setTimeout(() => {
       setCurrentItem(null);
       setImagePreview(null);
@@ -107,10 +106,15 @@ export default function Categories() {
     }
   };
 
+  // Función para capitalizar texto
+  const handleTextFormatting = (e) => {
+    const val = e.target.value;
+    e.target.value = val.replace(/(^\w|\s\w)/g, (m) => m.toUpperCase());
+  };
+
   // --- LOGICA DE GUARDAR ---
   const handleAdd = async (e) => {
     e.preventDefault();
-
     try {
       if (modalType === "addCategory") {
         const newCat = {
@@ -129,14 +133,12 @@ export default function Categories() {
             id: Date.now().toString(),
             name: subNameRef.current.value,
           };
-
           const updatedSubs = [...(parentCat.subcategories || []), newSub];
           const catRef = doc(db, "categories", parentId);
           await updateDoc(catRef, { subcategories: updatedSubs });
           toast.success("Subcategoría guardada en la nube ☁️");
         }
       }
-
       fetchCategories();
       closeModal();
     } catch (error) {
@@ -148,7 +150,6 @@ export default function Categories() {
   // --- LOGICA DE ACTUALIZAR ---
   const handleUpdate = async (e) => {
     e.preventDefault();
-
     try {
       if (modalType === "editCategory") {
         const catRef = doc(db, "categories", currentItem.id);
@@ -164,12 +165,10 @@ export default function Categories() {
               ? { ...sub, name: subNameRef.current.value }
               : sub
           );
-
           const catRef = doc(db, "categories", currentItem.parentId);
           await updateDoc(catRef, { subcategories: updatedSubs });
         }
       }
-
       fetchCategories();
       closeModal();
       toast.success("Actualizado correctamente");
@@ -184,7 +183,6 @@ export default function Categories() {
     try {
       if (modalType === "delete") {
         if (currentItem.parentId) {
-          // Borrar subcategoría
           const parentCat = categories.find(
             (c) => c.id === currentItem.parentId
           );
@@ -196,7 +194,6 @@ export default function Categories() {
             await updateDoc(catRef, { subcategories: updatedSubs });
           }
         } else {
-          // Borrar categoría completa
           await deleteDoc(doc(db, "categories", currentItem.id));
         }
       }
@@ -222,9 +219,7 @@ export default function Categories() {
           <h1 className="text-2xl font-bold text-slate-800">
             Categorías de Productos
           </h1>
-          <p className="text-sm text-slate-500">
-            Organiza tu inventario
-          </p>
+          <p className="text-sm text-slate-500">Organiza tu inventario</p>
         </div>
         <div className="flex gap-3">
           <button
@@ -242,7 +237,7 @@ export default function Categories() {
         </div>
       </div>
 
-      {/* LISTA DE CATEGORÍAS */}
+      {/* LISTA */}
       <div className="space-y-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
         {loading ? (
           <div className="text-center py-8 text-slate-400">
@@ -251,7 +246,6 @@ export default function Categories() {
         ) : (
           categories.map((category, index) => (
             <div key={category.id}>
-              {/* Categoría Padre */}
               <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200 group hover:border-blue-300 transition-all">
                 <div className="flex items-center gap-4">
                   <span className="font-bold text-blue-600">{index + 1}.</span>
@@ -281,36 +275,33 @@ export default function Categories() {
                   </button>
                 </div>
               </div>
-
-              {/* Subcategorías */}
               <div className="ml-8 mt-2 space-y-2 border-l-2 border-slate-100 pl-4">
-                {category.subcategories &&
-                  category.subcategories.map((sub) => (
-                    <div
-                      key={sub.id}
-                      className="flex items-center justify-between p-3 bg-white rounded-lg border border-slate-100 hover:border-slate-200 group transition-all"
-                    >
-                      <span className="text-slate-600 flex items-center gap-2">
-                        <span className="text-slate-300">-</span> {sub.name}
-                      </span>
-                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={() => openEdit(sub, "editSub", category.id)}
-                          className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-full transition-colors"
-                        >
-                          <Edit2 size={16} />
-                        </button>
-                        <button
-                          onClick={() =>
-                            openDelete(sub, "subcategory", category.id)
-                          }
-                          className="p-1.5 hover:bg-red-50 text-red-500 rounded-full transition-colors"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
+                {category.subcategories?.map((sub) => (
+                  <div
+                    key={sub.id}
+                    className="flex items-center justify-between p-3 bg-white rounded-lg border border-slate-100 hover:border-slate-200 group transition-all"
+                  >
+                    <span className="text-slate-600 flex items-center gap-2">
+                      <span className="text-slate-300">-</span> {sub.name}
+                    </span>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => openEdit(sub, "editSub", category.id)}
+                        className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-full transition-colors"
+                      >
+                        <Edit2 size={16} />
+                      </button>
+                      <button
+                        onClick={() =>
+                          openDelete(sub, "subcategory", category.id)
+                        }
+                        className="p-1.5 hover:bg-red-50 text-red-500 rounded-full transition-colors"
+                      >
+                        <Trash2 size={16} />
+                      </button>
                     </div>
-                  ))}
+                  </div>
+                ))}
                 {(!category.subcategories ||
                   category.subcategories.length === 0) && (
                   <p className="text-xs text-slate-400 italic py-2 pl-2">
@@ -323,11 +314,10 @@ export default function Categories() {
         )}
       </div>
 
-      {/* --- MODAL --- */}
+      {/* MODAL */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm transition-all">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-            {/* HEADER DEL MODAL (Dinámico según modalType) */}
             <div className="flex justify-between items-center p-6 border-b border-slate-100">
               <h3 className="text-xl font-bold text-slate-800">
                 {modalType === "addCategory" && "Agregar Categoría"}
@@ -342,10 +332,7 @@ export default function Categories() {
                 <X size={24} />
               </button>
             </div>
-
-            {/* CONTENIDO DEL MODAL (Renderizado Condicional) */}
             <div className="p-6">
-              {/* FORMULARIO CATEGORÍAS */}
               {(modalType === "addCategory" ||
                 modalType === "editCategory") && (
                 <form
@@ -363,6 +350,7 @@ export default function Categories() {
                       required
                       className={inputClass}
                       placeholder="Ej: Ferretería"
+                      onChange={handleTextFormatting}
                       autoFocus
                     />
                   </div>
@@ -405,8 +393,6 @@ export default function Categories() {
                   </button>
                 </form>
               )}
-
-              {/* FORMULARIO SUBCATEGORÍAS */}
               {(modalType === "addSub" || modalType === "editSub") && (
                 <form
                   onSubmit={modalType === "addSub" ? handleAdd : handleUpdate}
@@ -444,6 +430,7 @@ export default function Categories() {
                       required
                       className={inputClass}
                       placeholder="Ej: Martillos"
+                      onChange={handleTextFormatting}
                       autoFocus
                     />
                   </div>
@@ -455,8 +442,6 @@ export default function Categories() {
                   </button>
                 </form>
               )}
-
-              {/* CONFIRMACIÓN BORRAR */}
               {modalType === "delete" && (
                 <div className="text-center">
                   <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">
@@ -486,6 +471,13 @@ export default function Categories() {
           </div>
         </div>
       )}
+
+      {/* CSS LIMPIO SIN EL ATRIBUTO JSX QUE CAUSA ERROR */}
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
+      `}</style>
     </div>
   );
 }

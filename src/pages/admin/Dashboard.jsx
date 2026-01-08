@@ -17,19 +17,17 @@ import {
 import {
   Users,
   Package,
-  Image as ImageIcon,
+  ImageIcon,
   List,
   Tag,
   ShoppingBag,
 } from "lucide-react";
 
-// 1. IMPORTAR FIREBASE
 import { db } from "../../firebase/config";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, doc, getDoc } from "firebase/firestore"; // Añadido doc y getDoc
 
 const COLORS = ["#4285F4", "#DB4437", "#F4B400", "#0F9D58", "#8E24AA"];
 
-// --- CONFIGURACIÓN DE VISTAS (INTACTA) ---
 const VIEW_OPTIONS = [
   { id: "semana", label: "Semana" },
   { id: "anio", label: "Año" },
@@ -39,12 +37,10 @@ const VIEW_OPTIONS = [
 export default function Dashboard() {
   const [viewMode, setViewMode] = useState("anio");
   const [loading, setLoading] = useState(true);
+  const [isMounted, setIsMounted] = useState(false);
 
-  // ESTADOS DE DATOS REALES
   const [realUsers, setRealUsers] = useState([]);
   const [realRoles, setRealRoles] = useState([]);
-
-  // Datos crudos para cálculos
   const [paidOrders, setPaidOrders] = useState([]);
   const [topProductsData, setTopProductsData] = useState([]);
 
@@ -58,7 +54,6 @@ export default function Dashboard() {
     totalSales: 0,
   });
 
-  // 2. EFECTO: CARGAR DATOS DESDE FIREBASE
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
@@ -68,17 +63,18 @@ export default function Dashboard() {
           productsSnap,
           catsSnap,
           ordersSnap,
-          bannersSnap,
           couponsSnap,
           rolesSnap,
+          // Cambiamos el snap de banners por una consulta al documento de diseño
+          bannerDesignSnap,
         ] = await Promise.all([
           getDocs(collection(db, "users")),
           getDocs(collection(db, "products")),
           getDocs(collection(db, "categories")),
           getDocs(collection(db, "orders")),
-          getDocs(collection(db, "banners")),
           getDocs(collection(db, "coupons")),
           getDocs(collection(db, "roles")),
+          getDoc(doc(db, "banners", "design")), // Consultamos el documento específico
         ]);
 
         const orders = ordersSnap.docs.map((doc) => ({
@@ -86,16 +82,11 @@ export default function Dashboard() {
           ...doc.data(),
         }));
 
-        // --- CORRECCIÓN LÓGICA AQUÍ ---
-
-        // A. Calcular Conteos (Operativos)
-        // EXCLUIMOS: Entregado, Anulado Y ELIMINADO
         const activeOrders = orders.filter((o) => {
           const s = o.status;
           return s !== "Entregado" && s !== "Anulado" && s !== "Eliminado";
         }).length;
 
-        // B. Filtrar solo ventas reales (Pagadas, No Anuladas, No Eliminadas)
         const validPaidOrders = orders.filter(
           (o) =>
             o.status !== "Anulado" &&
@@ -104,13 +95,20 @@ export default function Dashboard() {
         );
         setPaidOrders(validPaidOrders);
 
-        // C. Calcular Total Dinero Real
         const totalSalesCalc = validPaidOrders.reduce(
           (acc, curr) => acc + (Number(curr.total) || 0),
           0
         );
 
-        // D. Calcular Top Productos
+        // Lógica para contar banners reales dentro del array
+        let realBannersCount = 0;
+        if (bannerDesignSnap.exists()) {
+          const designData = bannerDesignSnap.data();
+          if (designData.banners && Array.isArray(designData.banners)) {
+            realBannersCount = designData.banners.length;
+          }
+        }
+
         const productCount = {};
         validPaidOrders.forEach((order) => {
           if (order.items && Array.isArray(order.items)) {
@@ -131,13 +129,12 @@ export default function Dashboard() {
           users: usersSnap.size,
           products: productsSnap.size,
           categories: catsSnap.size,
-          banners: bannersSnap.size,
+          banners: realBannersCount, // Usamos el conteo del array
           orders: activeOrders,
           coupons: couponsSnap.size,
           totalSales: totalSalesCalc,
         });
 
-        // E. Datos Usuarios
         const usersData = usersSnap.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
@@ -149,6 +146,8 @@ export default function Dashboard() {
           ...doc.data(),
         }));
         setRealRoles(rolesData);
+
+        setIsMounted(true);
       } catch (error) {
         console.error("Error cargando dashboard:", error);
       } finally {
@@ -159,24 +158,19 @@ export default function Dashboard() {
     fetchData();
   }, []);
 
-  // 3. CÁLCULO DINÁMICO DE LA GRÁFICA (useMemo)
+  // ... (Mantenemos chartData, formatPriceCompact, formatPriceFull y el resto del JSX igual)
+
   const chartData = useMemo(() => {
-    // Helper para fechas
     const getOrderDate = (order) => {
       if (order.createdAt?.seconds)
         return new Date(order.createdAt.seconds * 1000);
-      if (order.date) {
-        return new Date();
-      }
       return new Date();
     };
 
     if (viewMode === "semana") {
-      // Últimos 7 días
       const daysMap = {};
       const daysOrder = [];
       const now = new Date();
-
       for (let i = 6; i >= 0; i--) {
         const d = new Date();
         d.setDate(now.getDate() - i);
@@ -185,17 +179,12 @@ export default function Dashboard() {
         daysMap[label] = 0;
         daysOrder.push(label);
       }
-
       paidOrders.forEach((order) => {
         const d = getOrderDate(order);
-        const diffTime = Math.abs(now - d);
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        if (diffDays <= 7) {
-          const dayName = d.toLocaleDateString("es-CO", { weekday: "short" });
-          const label = dayName.charAt(0).toUpperCase() + dayName.slice(1);
-          if (daysMap[label] !== undefined) {
-            daysMap[label] += Number(order.total) || 0;
-          }
+        const dayName = d.toLocaleDateString("es-CO", { weekday: "short" });
+        const label = dayName.charAt(0).toUpperCase() + dayName.slice(1);
+        if (daysMap[label] !== undefined) {
+          daysMap[label] += Number(order.total) || 0;
         }
       });
       return daysOrder.map((label) => ({
@@ -205,7 +194,6 @@ export default function Dashboard() {
     }
 
     if (viewMode === "anio") {
-      // Meses del año actual
       const currentYear = new Date().getFullYear();
       const months = [
         "Ene",
@@ -223,7 +211,6 @@ export default function Dashboard() {
       ];
       const salesByMonth = {};
       months.forEach((m) => (salesByMonth[m] = 0));
-
       paidOrders.forEach((order) => {
         const d = getOrderDate(order);
         if (d.getFullYear() === currentYear) {
@@ -235,7 +222,6 @@ export default function Dashboard() {
     }
 
     if (viewMode === "historico") {
-      // Agrupar por año
       const salesByYear = {};
       paidOrders.forEach((order) => {
         const d = getOrderDate(order);
@@ -247,11 +233,9 @@ export default function Dashboard() {
         .sort()
         .map((y) => ({ name: y, ventas: salesByYear[y] }));
     }
-
     return [];
   }, [viewMode, paidOrders]);
 
-  // Helper de precio
   const formatPriceCompact = (price) => {
     return new Intl.NumberFormat("es-CO", {
       style: "currency",
@@ -271,15 +255,15 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-[400px] flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-slate-900"></div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* TARJETAS CON ENLACES (LINKED CARDS) */}
+    <div className="space-y-6 pb-10">
+      {/* TARJETAS */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <Link
           to="/admin/usuarios"
@@ -291,7 +275,6 @@ export default function Dashboard() {
             icon={<Users size={24} />}
           />
         </Link>
-
         <Link
           to="/admin/productos"
           className="block transform transition hover:scale-105 active:scale-95"
@@ -302,7 +285,6 @@ export default function Dashboard() {
             icon={<Package size={24} />}
           />
         </Link>
-
         <Link
           to="/admin/banners"
           className="block transform transition hover:scale-105 active:scale-95"
@@ -313,7 +295,6 @@ export default function Dashboard() {
             icon={<ImageIcon size={24} />}
           />
         </Link>
-
         <Link
           to="/admin/categorias"
           className="block transform transition hover:scale-105 active:scale-95"
@@ -324,7 +305,6 @@ export default function Dashboard() {
             icon={<List size={24} />}
           />
         </Link>
-
         <Link
           to="/admin/marketing"
           className="block transform transition hover:scale-105 active:scale-95"
@@ -335,7 +315,6 @@ export default function Dashboard() {
             icon={<Tag size={24} />}
           />
         </Link>
-
         <Link
           to="/admin/pedidos"
           className="block transform transition hover:scale-105 active:scale-95"
@@ -348,10 +327,9 @@ export default function Dashboard() {
         </Link>
       </div>
 
-      {/* GRÁFICOS */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-96">
-        {/* Gráfico Izquierdo */}
-        <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 p-6 flex flex-col">
+      {/* ... (El resto del JSX para gráficos y tabla de usuarios se mantiene igual) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 p-6 flex flex-col min-h-[350px]">
           <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
             <h3 className="font-bold text-slate-700 text-lg">
               {viewMode === "semana"
@@ -360,7 +338,6 @@ export default function Dashboard() {
                 ? "Rendimiento Anual"
                 : "Crecimiento Histórico"}
             </h3>
-
             <div className="flex bg-slate-100 p-1 rounded-lg text-sm">
               {VIEW_OPTIONS.map((option) => (
                 <button
@@ -377,95 +354,106 @@ export default function Dashboard() {
               ))}
             </div>
           </div>
-
-          <div className="flex-1 w-full animate-in fade-in zoom-in duration-300">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart
-                data={chartData}
-                margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
-              >
-                <defs>
-                  <linearGradient id="colorVentas" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#3B82F6" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  vertical={false}
-                  stroke="#E2E8F0"
-                />
-                <XAxis
-                  dataKey="name"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fill: "#94a3b8", fontSize: 12 }}
-                />
-                <YAxis
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fill: "#94a3b8", fontSize: 12 }}
-                />
-                <Tooltip
-                  formatter={(value) => formatPriceFull(value)}
-                  contentStyle={{
-                    backgroundColor: "#fff",
-                    borderRadius: "12px",
-                    border: "none",
-                    boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)",
-                  }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="ventas"
-                  stroke="#3B82F6"
-                  strokeWidth={3}
-                  fillOpacity={1}
-                  fill="url(#colorVentas)"
-                  animationDuration={800}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+          <div className="flex-1 w-full h-full">
+            {isMounted && (
+              <ResponsiveContainer width="100%" height={300}>
+                <AreaChart
+                  data={chartData}
+                  margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
+                >
+                  <defs>
+                    <linearGradient
+                      id="colorVentas"
+                      x1="0"
+                      y1="0"
+                      x2="0"
+                      y2="1"
+                    >
+                      <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#3B82F6" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    vertical={false}
+                    stroke="#E2E8F0"
+                  />
+                  <XAxis
+                    dataKey="name"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fill: "#94a3b8", fontSize: 12 }}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fill: "#94a3b8", fontSize: 12 }}
+                  />
+                  <Tooltip
+                    formatter={(value) => formatPriceFull(value)}
+                    contentStyle={{
+                      backgroundColor: "#fff",
+                      borderRadius: "12px",
+                      border: "none",
+                      boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)",
+                    }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="ventas"
+                    stroke="#3B82F6"
+                    strokeWidth={3}
+                    fillOpacity={1}
+                    fill="url(#colorVentas)"
+                    animationDuration={800}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 
-        {/* Gráfico Derecho (Ventas Totales Reales) */}
-        <div className="lg:col-span-1 bg-white rounded-2xl shadow-sm border border-slate-100 p-6 flex flex-col relative">
+        <div className="lg:col-span-1 bg-white rounded-2xl shadow-sm border border-slate-100 p-6 flex flex-col relative min-h-[350px]">
           <h3 className="font-bold text-slate-700 text-lg mb-4">
             Productos Top
           </h3>
-          <div className="flex-1 w-full relative">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={topProductsData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={80}
-                  outerRadius={105}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {topProductsData.map((entry, index) => (
-                    <Cell
-                      key={`cell-${index}`}
-                      fill={COLORS[index % COLORS.length]}
-                      strokeWidth={0}
-                    />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#fff",
-                    borderRadius: "8px",
-                  }}
-                />
-                <Legend verticalAlign="bottom" height={36} iconType="circle" />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10 pb-8">
-              {/* Aquí mostramos la venta real calculada de Firebase */}
-              <span className="text-3xl font-extrabold text-slate-800 tracking-tight">
+          <div className="flex-1 w-full h-full relative">
+            {isMounted && (
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={topProductsData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={70}
+                    outerRadius={90}
+                    paddingAngle={5}
+                    dataKey="value"
+                  >
+                    {topProductsData.map((entry, index) => (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={COLORS[index % COLORS.length]}
+                        strokeWidth={0}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#fff",
+                      borderRadius: "8px",
+                    }}
+                  />
+                  <Legend
+                    verticalAlign="bottom"
+                    height={36}
+                    iconType="circle"
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10 pb-12">
+              <span className="text-2xl font-extrabold text-slate-800 tracking-tight">
                 {formatPriceCompact(counts.totalSales)}
               </span>
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
@@ -476,13 +464,10 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* TABLA DE USUARIOS (DATOS REALES) */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 flex flex-col">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="font-bold text-slate-700 text-lg">
-            Usuarios del sistema registrados
-          </h3>
-        </div>
+        <h3 className="font-bold text-slate-700 text-lg mb-6">
+          Usuarios del sistema registrados
+        </h3>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-xs tracking-wider">
@@ -537,6 +522,11 @@ export default function Dashboard() {
           </table>
         </div>
       </div>
+
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+      `}</style>
     </div>
   );
 }

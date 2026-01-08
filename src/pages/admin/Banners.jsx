@@ -10,10 +10,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 
-// 1. IMPORTAR SONNER
 import { toast } from "sonner";
-
-// IMPORTAR FIREBASE
 import { db } from "../../firebase/config";
 import { doc, getDoc, setDoc, collection, getDocs } from "firebase/firestore";
 
@@ -29,15 +26,13 @@ export default function Banners() {
     isActive: true,
   });
 
-  // Listas para los selectores
   const [availableProducts, setAvailableProducts] = useState([]);
   const [availableCategories, setAvailableCategories] = useState([]);
 
-  // --- 2. CARGAR DATOS ---
+  // --- 2. CARGAR DATOS (Solo al montar el componente) ---
   useEffect(() => {
     const loadData = async () => {
       try {
-        // A. Cargar Diseño
         const docRef = doc(db, "banners", "design");
         const docSnap = await getDoc(docRef);
 
@@ -46,7 +41,6 @@ export default function Banners() {
           if (data.banners) setBanners(data.banners);
           if (data.topBar) setTopBar(data.topBar);
         } else {
-          // Default
           setBanners([
             {
               id: 1,
@@ -54,16 +48,15 @@ export default function Banners() {
               subtitle: "Descubre nuestra nueva colección.",
               btnText: "Ver Ofertas",
               link: "/productos",
-              linkType: "product", // Default a producto
+              linkType: "product",
               targetId: "",
-              subTargetId: "", // Nuevo campo para subcategoría
+              subTargetId: "",
               image: null,
               active: true,
             },
           ]);
         }
 
-        // B. Cargar Productos y Categorías
         const [prodsSnap, catsSnap] = await Promise.all([
           getDocs(collection(db, "products")),
           getDocs(collection(db, "categories")),
@@ -85,18 +78,24 @@ export default function Banners() {
     loadData();
   }, []);
 
-  // --- 3. PERSISTENCIA LOCAL ---
+  // --- 3. PERSISTENCIA LOCAL CORREGIDA ---
+  // He eliminado la dependencia de 'localStorage' dentro del effect para evitar bucles
+  // y asegurar que el borrado sea definitivo en la sesión actual.
   useEffect(() => {
-    localStorage.setItem("shopBanners", JSON.stringify(banners));
-    const currentDesign = JSON.parse(
-      localStorage.getItem("shopDesign") || "{}"
-    );
-    localStorage.setItem(
-      "shopDesign",
-      JSON.stringify({ ...currentDesign, topBar })
-    );
-    window.dispatchEvent(new Event("storage"));
-  }, [banners, topBar]);
+    if (!loading) {
+      localStorage.setItem("shopBanners", JSON.stringify(banners));
+
+      // Actualizamos shopDesign sin disparar re-cargas infinitas
+      const designToSave = {
+        topBar: topBar,
+        updatedAt: new Date().getTime(),
+      };
+      localStorage.setItem("shopDesign", JSON.stringify(designToSave));
+
+      // Solo lanzamos el evento si es estrictamente necesario para otros componentes
+      window.dispatchEvent(new Event("storage"));
+    }
+  }, [banners, topBar, loading]);
 
   // --- 4. FUNCIONES ---
 
@@ -107,9 +106,7 @@ export default function Banners() {
       toast.success("¡Diseño guardado en la nube! ☁️");
     } catch (error) {
       console.error("Error guardando:", error);
-      toast.error("Error al guardar", {
-        description: "Verifica el tamaño de las imágenes.",
-      });
+      toast.error("Error al guardar");
     }
   };
 
@@ -117,9 +114,7 @@ export default function Banners() {
     const file = e.target.files[0];
     if (file) {
       if (file.size > 1000000) {
-        toast.warning("Imagen muy pesada", {
-          description: "El límite recomendado es 1MB.",
-        });
+        toast.warning("Imagen muy pesada (Máx 1MB)");
         return;
       }
       const reader = new FileReader();
@@ -141,7 +136,7 @@ export default function Banners() {
         subtitle: "Descripción...",
         btnText: "Ver más",
         link: "",
-        linkType: "product", // Default
+        linkType: "product",
         targetId: "",
         subTargetId: "",
         image: null,
@@ -153,14 +148,14 @@ export default function Banners() {
 
   const deleteBanner = (id) => {
     if (banners.length === 1) {
-      toast.warning("Acción no permitida", {
-        description: "Debes mantener al menos un banner visible.",
-      });
+      toast.warning("Debes mantener al menos un banner.");
       return;
     }
-    // Opcional: Agregar confirmación si quieres seguir el patrón seguro
     if (window.confirm("¿Eliminar este banner?")) {
+      // Al filtrar aquí, el useEffect de persistencia actualizará el localStorage
+      // con la lista corta, eliminando el banner definitivamente.
       setBanners((prev) => prev.filter((b) => b.id !== id));
+      toast.info("Banner quitado de la lista");
     }
   };
 
@@ -170,18 +165,13 @@ export default function Banners() {
     );
   };
 
-  // --- LÓGICA DE ENLACES MEJORADA ---
   const updateLinkLogic = (id, type, targetId = "", subTargetId = "") => {
     let finalLink = "/productos";
-
     if (type === "product" && targetId) {
       finalLink = `/producto/${targetId}`;
     } else if (type === "category" && targetId) {
       finalLink = `/categoria/${targetId}`;
-      // Si seleccionó subcategoría, la agregamos al link
-      if (subTargetId) {
-        finalLink += `?sub=${encodeURIComponent(subTargetId)}`;
-      }
+      if (subTargetId) finalLink += `?sub=${encodeURIComponent(subTargetId)}`;
     }
 
     setBanners((prev) =>
@@ -305,7 +295,6 @@ export default function Banners() {
             key={banner.id}
             className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-6 animate-in slide-in-from-bottom-2"
           >
-            {/* Lado Izquierdo: Imagen */}
             <div className="w-full md:w-1/3 aspect-video bg-slate-100 rounded-xl relative overflow-hidden group border-2 border-dashed border-slate-300 hover:border-blue-400 transition cursor-pointer">
               {banner.image ? (
                 <img
@@ -329,7 +318,6 @@ export default function Banners() {
               />
             </div>
 
-            {/* Lado Derecho: Configuración */}
             <div className="flex-1 space-y-4">
               <div className="flex justify-between">
                 <span className="text-xs font-bold bg-slate-100 px-2 py-1 rounded text-slate-500">
@@ -374,9 +362,7 @@ export default function Banners() {
                     }
                   />
 
-                  {/* --- CONFIGURACIÓN DE ENLACE --- */}
                   <div className="flex flex-col gap-2">
-                    {/* 1. Selector de Tipo (Solo Producto o Categoría) */}
                     <div className="relative">
                       <select
                         className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 outline-none focus:border-blue-500 appearance-none cursor-pointer"
@@ -394,7 +380,6 @@ export default function Banners() {
                       />
                     </div>
 
-                    {/* 2. Selector de Producto */}
                     {banner.linkType === "product" && (
                       <select
                         className="w-full p-2 bg-white border border-blue-200 rounded-lg text-xs text-slate-600 outline-none focus:border-blue-500"
@@ -412,10 +397,8 @@ export default function Banners() {
                       </select>
                     )}
 
-                    {/* 3. Selector de Categoría (Y Subcategoría) */}
                     {banner.linkType === "category" && (
                       <div className="flex flex-col gap-2">
-                        {/* Categoría Principal */}
                         <select
                           className="w-full p-2 bg-white border border-blue-200 rounded-lg text-xs text-slate-600 outline-none focus:border-blue-500"
                           value={banner.targetId || ""}
@@ -436,16 +419,11 @@ export default function Banners() {
                           ))}
                         </select>
 
-                        {/* Subcategoría (Solo si la categoría elegida tiene) */}
                         {(() => {
                           const selectedCat = availableCategories.find(
                             (c) => String(c.id) === String(banner.targetId)
                           );
-                          if (
-                            selectedCat &&
-                            selectedCat.subcategories &&
-                            selectedCat.subcategories.length > 0
-                          ) {
+                          if (selectedCat?.subcategories?.length > 0) {
                             return (
                               <select
                                 className="w-full p-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-slate-600 outline-none focus:border-blue-500"
@@ -463,7 +441,6 @@ export default function Banners() {
                                   Todas las subcategorías
                                 </option>
                                 {selectedCat.subcategories.map((sub, idx) => {
-                                  // Manejo por si subcategory es string o objeto
                                   const subName =
                                     typeof sub === "string" ? sub : sub.name;
                                   return (
@@ -478,8 +455,6 @@ export default function Banners() {
                         })()}
                       </div>
                     )}
-
-                    {/* Link Visual (Solo lectura) */}
                     <div className="flex items-center gap-1 text-[10px] text-slate-400 px-1">
                       <LinkIcon size={10} />
                       <span className="truncate max-w-[150px]">

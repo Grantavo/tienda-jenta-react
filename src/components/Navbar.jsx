@@ -248,7 +248,7 @@ export default function Navbar({ cartCount, onOpenCart }) {
 
           {/* Enlace de Usuario (Dirige al Admin si hay sesión) */}
           <Link
-            to={data.user ? "/" : "/login"}
+            to={data.user ? "/" : "/"}
             className="p-2 hover:bg-slate-50 rounded-full text-slate-600 transition-colors"
             title={data.user ? "Ir al Panel Admin" : "Iniciar Sesión"}
           >

@@ -1,4 +1,12 @@
-import { createContext, useState, useContext, useEffect } from "react";
+/* eslint-disable react-refresh/only-export-components */
+import {
+  createContext,
+  useState,
+  useContext,
+  useEffect,
+  useMemo,
+  useCallback,
+} from "react";
 
 const CartContext = createContext();
 
@@ -17,7 +25,8 @@ export function CartProvider({ children }) {
     localStorage.setItem("jenta_cart", JSON.stringify(cart));
   }, [cart]);
 
-  const addToCart = (product) => {
+  // Optimización: useCallback para que la función no cambie en cada render
+  const addToCart = useCallback((product) => {
     setCart((prevCart) => {
       const existingProduct = prevCart.find((item) => item.id === product.id);
 
@@ -31,19 +40,27 @@ export function CartProvider({ children }) {
         return [...prevCart, { ...product, quantity: 1 }];
       }
     });
-  };
+  }, []);
 
-  const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0);
+  // Optimización: Cálculo memorizado del total
+  const cartCount = useMemo(() => {
+    return cart.reduce((acc, item) => acc + item.quantity, 0);
+  }, [cart]);
 
-  const value = {
-    cart,
-    addToCart,
-    cartCount,
-  };
+  // Optimización: El valor del contexto no cambia a menos que cambie el carrito
+  const value = useMemo(
+    () => ({
+      cart,
+      addToCart,
+      cartCount,
+    }),
+    [cart, addToCart, cartCount]
+  );
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }
 
+// Hook exportado en el mismo archivo (Seguro con la línea eslint-disable)
 export const useCart = () => {
   const context = useContext(CartContext);
   if (!context) {

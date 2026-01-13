@@ -1,16 +1,5 @@
 {
-  "version": 2,
-  "cleanUrls": true,
-  "framework": "vite",
   "rewrites": [
-    {
-      "source": "/admin/(.*)",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/login",
-      "destination": "/index.html"
-    },
     {
       "source": "/(.*)",
       "destination": "/index.html"

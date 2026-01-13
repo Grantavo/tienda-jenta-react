@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate, useOutletContext } from "react-router-dom";
+import { Helmet } from "react-helmet-async"; // IMPORTACIÓN CRÍTICA PARA SEO
 import {
   ShoppingCart,
   MessageCircle,
@@ -96,6 +97,33 @@ export default function ProductDetail() {
   const price = Number(product.price) || 0;
   const oldPrice = Number(product.oldPrice) || 0;
 
+  // --- LÓGICA SEO: ESTRUCTURA DE DATOS (SCHEMA.ORG) ---
+  const structuredData = {
+    "@context": "https://schema.org/",
+    "@type": "Product",
+    name: product.title,
+    image: validImages,
+    description:
+      product.description || `Compra ${product.title} al mejor precio.`,
+    sku: product.id,
+    brand: {
+      "@type": "Brand",
+      name: product.brand || "Tienda Jenta",
+    },
+    offers: {
+      "@type": "Offer",
+      url: window.location.href,
+      priceCurrency: "COP",
+      price: price,
+      availability:
+        Number(product.stock) > 0
+          ? "https://schema.org/InStock"
+          : "https://schema.org/OutOfStock",
+      itemCondition: "https://schema.org/NewCondition",
+    },
+  };
+  // ----------------------------------------------------
+
   const handleWhatsApp = () => {
     const message = `Hola, me interesa el producto: *${
       product.title
@@ -110,6 +138,32 @@ export default function ProductDetail() {
 
   return (
     <div className="bg-white min-h-screen pb-20 pt-6">
+      {/* INYECCIÓN DE METADATOS Y JSON-LD */}
+      <Helmet>
+        <title>{`${product.title} | Tienda Jenta`}</title>
+        <meta
+          name="description"
+          content={
+            product.description?.substring(0, 160) ||
+            `Compra ${product.title} a excelente precio en Tienda Jenta.`
+          }
+        />
+        <meta property="og:title" content={product.title} />
+        <meta
+          property="og:description"
+          content={product.description?.substring(0, 160)}
+        />
+        {validImages[0] && (
+          <meta property="og:image" content={validImages[0]} />
+        )}
+        <meta property="og:type" content="product" />
+        <meta property="product:price:amount" content={price} />
+        <meta property="product:price:currency" content="COP" />
+        <script type="application/ld+json">
+          {JSON.stringify(structuredData)}
+        </script>
+      </Helmet>
+
       <div className="container mx-auto px-4 max-w-6xl">
         <button
           onClick={() => navigate(-1)}

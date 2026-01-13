@@ -6,36 +6,34 @@ export default function ProtectedRoute({ module }) {
   const userStr = sessionStorage.getItem("shopUser");
   const rolesStr = localStorage.getItem("shopRoles");
 
-  // 2. Si no hay sesión, al login
-  if (!userStr) {
+  // MEJORA: Validación de existencia inmediata para evitar errores de parseo
+  if (!userStr || !rolesStr) {
     return <Navigate to="/login" replace />;
   }
 
   try {
     const user = JSON.parse(userStr);
-    const allRoles = JSON.parse(rolesStr || "[]");
+    const allRoles = JSON.parse(rolesStr);
 
-    // 3. Validación de integridad
-    if (!user.id || !user.roleId) {
+    // 2. Validación de integridad
+    if (!user?.id || !user?.roleId) {
       throw new Error("Sesión incompleta");
     }
 
-    // 4. LÓGICA DE PERMISOS
-    // Buscamos el rol del usuario en la lista de roles
+    // 3. LÓGICA DE PERMISOS
     const userRole = allRoles.find((r) => r.id === user.roleId);
 
-    // Si el rol es "isSystem" (Super Admin), siempre tiene permiso (pasa directo)
+    // Si el rol es "isSystem" (Super Admin), pasa directo
     if (userRole?.isSystem) {
       return <Outlet />;
     }
 
-    // 5. VALIDACIÓN POR MÓDULO (Si se requiere un módulo específico)
+    // 4. VALIDACIÓN POR MÓDULO
     if (module) {
       const hasPermission = userRole?.permissions?.includes(module);
 
       if (!hasPermission) {
         console.warn(`Acceso denegado al módulo: ${module}`);
-        // Si no tiene permiso, lo mandamos al Dashboard de admin (que es la ruta base)
         return <Navigate to="/admin" replace />;
       }
     }
@@ -43,6 +41,7 @@ export default function ProtectedRoute({ module }) {
     // Todo OK
     return <Outlet />;
   } catch (error) {
+    // MEJORA: Si el JSON está mal formado o algo falla, limpiamos para evitar bucles de error
     console.error("Error en validación de seguridad:", error);
     sessionStorage.removeItem("shopUser");
     return <Navigate to="/login" replace />;
